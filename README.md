@@ -1,4 +1,4 @@
 # parrotpi
-Raspi Control for Parrot for BFAC, v0.2
+Raspi Control for Parrot for BFAC, v0.3
 
 
