@@ -1,8 +1,14 @@
 from flask import Flask, jsonify, request
+from flask import render_template
+
+from flasgger import Swagger
 from .controller import Servo
 from .config import SERVO_PINS
 
 app = Flask(__name__)
+# Initialize Flasgger HERE
+swagger = Swagger(app)
+
 
 # Create servo objects (real or simulated depending on config)
 servos = {
@@ -10,14 +16,21 @@ servos = {
     for name, pin in SERVO_PINS.items()
 }
 
-# POST /servo/beak/open
-# POST /servo/beak/close
-# POST /servo/head/open
-# POST /servo/head/close
+
+@app.route("/")
+def index():
+    return render_template("index.html")
 
 
 @app.route("/ping")
 def ping():
+    """
+    Heartbeat check
+    ---
+    responses:
+      200:
+        description: OK
+    """
     return jsonify({"status": "ok"})
 
 @app.route("/servo/<name>/open", methods=["POST"])

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ParrotPi Control</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            text-align: center;
+            margin-top: 40px;
+        }
+        .row {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px auto;
+            width: 300px;
+        }
+        button, select {
+            padding: 12px 20px;
+            font-size: 18px;
+            cursor: pointer;
+        }
+        #result {
+            margin-top: 20px;
+            font-size: 16px;
+            color: #333;
+        }
+        .section {
+            margin-top: 40px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- PING BUTTON -->
+    <button onclick="ping()">PING</button>
+    <div id="result"></div>
+
+    <!-- MAIN CONTROL ROW -->
+    <div class="row section">
+        <button onclick="left()">&lt;&lt;</button>
+
+        <!-- Always-visible phrase dropdown -->
+        <select id="phraseSelect" onchange="saySelected()">
+            <option value="">SAY...</option>
+            <option value="Hello">Hello</option>
+            <option value="Goodbye">Goodbye</option>
+            <option value="DoesHeTalk">Does he talk?</option>
+            <option value="Laugh">Laugh</option>
+        </select>
+
+        <button onclick="right()">&gt;&gt;</button>
+    </div>
+
+    <!-- QUICK PHRASE BUTTONS -->
+    <div class="section">
+        <button onclick="say('Laugh')">LAUGH</button>
+        <button onclick="say('Hello')">HI</button>
+    </div>
+
+    <!-- FUTURE LIVE TALK BUTTON -->
+    <div class="section">
+        <button onclick="talkLive()">TALK...</button>
+    </div>
+
+    <script>
+        function ping() {
+            fetch('/ping')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('result').innerText = JSON.stringify(data);
+                })
+                .catch(err => {
+                    document.getElementById('result').innerText = "Error: " + err;
+                });
+        }
+
+        function saySelected() {
+            const phrase = document.getElementById('phraseSelect').value;
+            if (phrase) say(phrase);
+        }
+
+        function say(phrase) {
+            console.log("SAY:", phrase);
+            // eventually: fetch(`/say/${phrase}`, { method: "POST" })
+        }
+
+        function left() {
+            console.log("LEFT button clicked");
+        }
+
+        function right() {
+            console.log("RIGHT button clicked");
+        }
+
+        function talkLive() {
+            console.log("TALK... (future live voice streaming)");
+        }
+    </script>
+
+</body>
+</html>
