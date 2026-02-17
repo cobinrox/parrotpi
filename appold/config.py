@@ -5,7 +5,7 @@
 # Toggle between real hardware and simulation mode
 # True  = use simulated hardware (safe on PC or when testing)
 # False = use real GPIO hardware on Raspberry Pi
-SIMULATION_MODE = False
+SIMULATION_MODE = True
 
 # GPIO pin assignments for servos
 # These names must match the names you use in server.py routes

@@ -4,6 +4,7 @@ click==8.3.1
 colorzero==2.0
 flasgger==0.9.7.1
 Flask==3.1.2
+flask-cors==6.0.2
 gpiozero==2.0.1
 itsdangerous==2.2.0
 Jinja2==3.1.6

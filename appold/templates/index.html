@@ -81,12 +81,7 @@
 
         function say(phrase) {
             console.log("SAY:", phrase);
-
-            // Simple placeholder: open beak, wait, close
-            fetch('/servo/beak/open', { method: "POST" })
-                .then(() => setTimeout(() => {
-                fetch('/servo/beak/close', { method: "POST" })
-            }, 300));
+            // eventually: fetch(`/say/${phrase}`, { method: "POST" })
         }
 
         function left() {
