@@ -29,7 +29,13 @@ SERVO_SETTINGS = {
     }
 }
 
+import os
+
 # Future expansion:
 # AUDIO_DEVICE = "default"
 # CAMERA_ENABLED = False
 # LED_PINS = { "eye_left": 22, "eye_right": 23 }
+
+# Directory where .wav audio files live. Default is app/static/audio next to this file.
+# Use an absolute path here for system-wide locations (e.g. /var/lib/parrotpi/audio)
+AUDIO_DIR = os.path.join(os.path.dirname(__file__), "static", "audio")

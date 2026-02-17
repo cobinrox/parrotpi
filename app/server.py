@@ -66,9 +66,17 @@ def servo_open(name):
     if name not in servos:
         return jsonify({"error": f"Unknown servo '{name}'"}), 404
 
-    logging.info(f"Route: /servo/{name}/open")
+    # Read optional phrase from JSON body (may be empty or null)
+    data = request.get_json(silent=True) or {}
+    phrase = data.get("phrase")
+
+    if phrase:
+        logging.info(f"Route: /servo/{name}/open -> phrase: {phrase}")
+    else:
+        logging.info(f"Route: /servo/{name}/open -> no phrase provided")
+
     servos[name].open()
-    return jsonify({"servo": name, "action": "open"})
+    return jsonify({"servo": name, "action": "open", "phrase": phrase})
 
 
 @app.route("/servo/<name>/close", methods=["POST"])
