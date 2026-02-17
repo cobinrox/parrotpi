@@ -72,14 +72,21 @@ a) provide username cobinrox, password token value
 b) Run: git config --global credential.helper store
 c) dumb, but make another change and push, then another change and push, now your token should be good
 
-F) Test GPIO pins
+F) Set virtual environment
+1) cd to the parrotpi directory
+2) `./1_venv_create.sh`
+3) IMPORTANT NOTE SYNTAX! `source 2_venv_activate.sh`
+3) `./3_venv_req_install.sh`
+
+G) Test GPIO pins
 1) Connect an LED + lead on gpio 17 (pin 11)
 2) Connect the LED's - lead on Ground
 3) In parrotpi dir, change to scripts
 4) Run: python gpio_17.py
 5) LED should blink on and off
 
-G) Set up to have parrot server start up on boot
+H) Set up to have parrot server start up on boot
+0) (IMPORTANT NOTE: Must have the venv activated!)
 1) In parrotpi dir, run: sudo install_as_service_RUN_AS_SUDO.sh
 
 H) Set up Remote SSH on VSCode on Your PC
@@ -96,15 +103,7 @@ a)   enter an image name including the base memory size, e.g. parrotpi_32G_backu
 b)   you should be able to restore the image to the same size of memory card or larger
 c)   saves img file to downloads folder by default
 
-H) Initialize venv for parrotpi project
-1) 
-2) cd to the parrotpi directory
-3) python3 -m venv venv
-4) source venv/bin/activate
-pip install flask gpiozero RPi.GPIO
-pip install simpleaudio
-pip freeze > requirements.txt
-   
+
 ```
    
    
