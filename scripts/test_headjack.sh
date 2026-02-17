@@ -1,0 +1,1 @@
+speaker-test -t sine -f 440 -l 1

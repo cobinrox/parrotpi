@@ -11,9 +11,14 @@ the configured `AUDIO_DIR` from `app.config`.
 import sys
 import os
 import glob
-from ..config import AUDIO_DIR
 
-#from app.config import AUDIO_DIR
+# Allow importing app when running as script: python3 scripts/test_audio.py
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_script_dir)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+from app.config import AUDIO_DIR
 from app.hardware.gpio_audio import RealAudio
 
 
