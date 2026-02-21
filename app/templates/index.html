@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ParrotPi Control v0.1</title>
+    <title>ParrotPi Control v0.2</title>
     <style>
         body {
             font-family: sans-serif;
@@ -55,7 +55,7 @@
             <button onclick="closeBeak()">Close Beak</button>
             <button onclick="headLeft()">Head Left</button>
             <button onclick="headRight()">Head Right</button>
-            <button onclick="walkieTalkie()">Walkie Talkie</button>
+            <button onclick="talkLive()">Walkie Talkie</button>
         </div>
     </div>
 
@@ -88,103 +88,126 @@
     <!-- RESPONSE BOX -->
     <div id="responseBox">RESPONSE: (waiting for command)</div>
 
-    <script>
-        function showResponse(label, data) {
-            const box = document.getElementById('responseBox');
-            let formatted = "";
+ <!--script src="/socket.io/socket.io.js"></script-->
+<script src="https://cdn.socket.io/3.1.3/socket.io.min.js"></script> 
+<script>
+    const socket = io();   // Connect to Flask-SocketIO backend
 
-            if (typeof data === "object") {
-                formatted = JSON.stringify(data, null, 2);
-            } else {
-                formatted = data;
-            }
+    let mediaRecorder = null;
+    let isTalking = false;
 
-            box.textContent = `RESPONSE (${label}):\n${formatted}`;
+    function showResponse(label, data) {
+        const box = document.getElementById('responseBox');
+        let formatted = "";
+
+        if (typeof data === "object") {
+            formatted = JSON.stringify(data, null, 2);
+        } else {
+            formatted = data;
         }
 
-        // --- BASIC PING ---
-        function ping() {
-            fetch('/ping')
-                .then(r => r.json())
-                .then(data => showResponse("PING", data))
-                .catch(err => showResponse("PING ERROR", err));
-        }
+        box.textContent = `RESPONSE (${label}):\n${formatted}`;
+    }
 
-        // --- DIAGNOSTICS ---
-        function openBeak() {
-            fetch('/servo/beak/open', { method: "POST" })
-                .then(r => r.json())
-                .then(data => showResponse("OPEN BEAK", data))
-                .catch(err => showResponse("OPEN BEAK ERROR", err));
-        }
-
-        function closeBeak() {
-            fetch('/servo/beak/close', { method: "POST" })
-                .then(r => r.json())
-                .then(data => showResponse("CLOSE BEAK", data))
-                .catch(err => showResponse("CLOSE BEAK ERROR", err));
-        }
-
-        function headLeft() {
-            fetch('/servo/head/left', { method: "POST" })
-                .then(r => r.json())
-                .then(data => showResponse("HEAD LEFT", data))
-                .catch(err => showResponse("HEAD LEFT ERROR", err));
-        }
-
-        function headRight() {
-            fetch('/servo/head/right', { method: "POST" })
-                .then(r => r.json())
-                .then(data => showResponse("HEAD RIGHT", data))
-                .catch(err => showResponse("HEAD RIGHT ERROR", err));
-        }
-
-        function walkieTalkie() {
-            fetch('/talk/walkietalkie', { method: "POST" })
-                .then(r => r.json())
-                .then(data => showResponse("WALKIE TALKIE", data))
-                .catch(err => showResponse("WALKIE TALKIE ERROR", err));
-        }
-
-        // --- SAY ---
-        function saySelected() {
-            const phrase = document.getElementById('phraseSelect').value;
-            if (phrase) say(phrase);
-        }
-
-        function say(phrase) {
-            fetch('/say', {
-                method: "POST",
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phrase })
-            })
+    // --- BASIC PING ---
+    function ping() {
+        fetch('/ping')
             .then(r => r.json())
-            .then(data => {
-                showResponse(`SAY (${phrase})`, data);
-                
-            })
-            .catch(err => showResponse("SAY ERROR", err));
+            .then(data => showResponse("PING", data))
+            .catch(err => showResponse("PING ERROR", err));
+    }
+
+    // --- DIAGNOSTICS ---
+    function openBeak() {
+        fetch('/servo/beak/open', { method: "POST" })
+            .then(r => r.json())
+            .then(data => showResponse("OPEN BEAK", data))
+            .catch(err => showResponse("OPEN BEAK ERROR", err));
+    }
+
+    function closeBeak() {
+        fetch('/servo/beak/close', { method: "POST" })
+            .then(r => r.json())
+            .then(data => showResponse("CLOSE BEAK", data))
+            .catch(err => showResponse("CLOSE BEAK ERROR", err));
+    }
+
+    function headLeft() {
+        fetch('/servo/head/left', { method: "POST" })
+            .then(r => r.json())
+            .then(data => showResponse("HEAD LEFT", data))
+            .catch(err => showResponse("HEAD LEFT ERROR", err));
+    }
+
+    function headRight() {
+        fetch('/servo/head/right', { method: "POST" })
+            .then(r => r.json())
+            .then(data => showResponse("HEAD RIGHT", data))
+            .catch(err => showResponse("HEAD RIGHT ERROR", err));
+    }
+
+    // --- SAY ---
+    function saySelected() {
+        const phrase = document.getElementById('phraseSelect').value;
+        if (phrase) say(phrase);
+    }
+
+    function say(phrase) {
+        fetch('/say', {
+            method: "POST",
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phrase })
+        })
+        .then(r => r.json())
+        .then(data => showResponse(`SAY (${phrase})`, data))
+        .catch(err => showResponse("SAY ERROR", err));
+    }
+
+    // --- MOVEMENT BUTTONS ---
+    function left() {
+        fetch('/servo/head/left', { method: "POST" })
+            .then(r => r.json())
+            .then(data => showResponse("LEFT BUTTON", data))
+            .catch(err => showResponse("LEFT ERROR", err));
+    }
+
+    function right() {
+        fetch('/servo/head/right', { method: "POST" })
+            .then(r => r.json())
+            .then(data => showResponse("RIGHT BUTTON", data))
+            .catch(err => showResponse("RIGHT ERROR", err));
+    }
+
+    // --- WALKIE TALKIE (WEBSOCKETS) ---
+    async function talkLive() {
+        if (isTalking) {
+            // Stop recording
+            isTalking = false;
+            mediaRecorder.stop();
+            showResponse("WALKIE TALKIE", "Stopped talking");
+            return;
         }
 
-        // --- MOVEMENT BUTTONS ---
-        function left() {
-            fetch('/servo/head/left', { method: "POST" })
-                .then(r => r.json())
-                .then(data => showResponse("LEFT BUTTON", data))
-                .catch(err => showResponse("LEFT ERROR", err));
-        }
+        // Start recording
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
 
-        function right() {
-            fetch('/servo/head/right', { method: "POST" })
-                .then(r => r.json())
-                .then(data => showResponse("RIGHT BUTTON", data))
-                .catch(err => showResponse("RIGHT ERROR", err));
-        }
+            mediaRecorder.ondataavailable = async (event) => {
+                if (event.data.size > 0) {
+                    const buffer = await event.data.arrayBuffer();
+                    socket.emit("mic_chunk", { audio: buffer });
+                }
+            };
 
-        function talkLive() {
-            showResponse("TALK LIVE", "Future feature...");
-        }
-    </script>
+            mediaRecorder.start(100); // send audio every 100ms
+            isTalking = true;
+            showResponse("WALKIE TALKIE", "Streaming microphone audio...");
 
+        } catch (err) {
+            showResponse("WALKIE TALKIE ERROR", err.toString());
+        }
+    }
+</script>
 </body>
 </html>

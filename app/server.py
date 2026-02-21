@@ -1,6 +1,15 @@
+import eventlet
+eventlet.monkey_patch()
+import subprocess
+import numpy as np
+import sounddevice as sd
+import time
+
 from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 from flasgger import Swagger
+from flask_socketio import SocketIO, emit
+
 
 from .controller import Servo # import either sim or real hw servo based on config
 from .controller import Audio # import either sim or real hw audio based on config
@@ -8,6 +17,40 @@ from .config import SERVO_PINS
 
 import logging
 import time
+import numpy as np
+import sounddevice as sd
+
+#decoder = av.CodecContext.create("opus", "r")
+
+ffmpeg = subprocess.Popen(
+    [
+        "ffmpeg",
+        "-loglevel", "quiet",
+        "-i", "pipe:0",
+        "-f", "f32le",
+        "-acodec", "pcm_f32le",
+        "-ac", "1",
+        "-ar", "48000",
+        "pipe:1"
+    ],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+)
+
+audio_stream = sd.OutputStream(samplerate=48000, channels=1)
+audio_stream.start()
+
+smoothed_amp = 0.0
+last_update = time.time()
+
+
+
+
+# ---------------------------------------------------------
+# socketio setup for receiving mic audio chunks (not fully implemented yet)
+# ---------------------------------------------------------
+
+
 
 # ---------------------------------------------------------
 # Logging Setup
@@ -24,7 +67,45 @@ logging.info("Starting server.py")
 app = Flask(__name__)
 CORS(app)
 swagger = Swagger(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
+smoothed_amp = 0.0
+last_update = time.time()
 
+@socketio.on('mic_chunk')
+def handle_mic_chunk(data):
+    global smoothed_amp, last_update
+
+    audio_bytes = data['audio']
+
+    try:
+        # Feed WebM/Opus chunk to FFmpeg
+        ffmpeg.stdin.write(audio_bytes)
+
+        # Read decoded PCM (float32)
+        pcm = ffmpeg.stdout.read(len(audio_bytes) * 4)
+        if not pcm:
+            return
+
+        pcm = np.frombuffer(pcm, dtype=np.float32)
+
+        # Play audio
+        audio_stream.write(pcm)
+
+        # Compute amplitude
+        amplitude = np.abs(pcm).mean()
+        smoothed_amp = 0.8 * smoothed_amp + 0.2 * amplitude
+
+        # Update beak at 20 Hz
+        now = time.time()
+        if now - last_update > 0.05:
+            last_update = now
+            if smoothed_amp > 0.02:
+                servos['beak'].open()
+            else:
+                servos['beak'].close()
+
+    except Exception as e:
+        logging.error(f"Decode error: {e}")
 # ---------------------------------------------------------
 # Servo Initialization
 # ---------------------------------------------------------
@@ -182,7 +263,9 @@ def servo_relax(name):
 # ---------------------------------------------------------
 def start():
     logging.info("Starting Flask server...")
-    app.run(host="0.0.0.0", port=5000, threaded=True)
+    #app.run(host="0.0.0.0", port=5000, threaded=True)
+    print("async_mode =", socketio.async_mode)
+    socketio.run(app,host="0.0.0.0", port=5000)
 
 
 if __name__ == "__main__":

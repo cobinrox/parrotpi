@@ -53,6 +53,8 @@ D) Add packages over SSH terminal
 3) sudo apt install git
 4) sudo apt install hostapd dnsmasq (for wifi access pt)
 5) sudo apt install python3-venv (for python env)
+6) sudo apt install libopenblas0 libopenblas-dev
+sudo apt install libportaudio2 libportaudiocpp0 portaudio19-dev
 
 E) Set up github project, personal token
 0) Create repo on github
