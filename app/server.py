@@ -2,10 +2,12 @@ from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 from flasgger import Swagger
 
-from .controller import Servo
+from .controller import Servo # import either sim or real hw servo based on config
+from .controller import Audio # import either sim or real hw audio based on config
 from .config import SERVO_PINS
 
 import logging
+import time
 
 # ---------------------------------------------------------
 # Logging Setup
@@ -34,7 +36,7 @@ servos = {
     name: create_servo(name, pin)
     for name, pin in SERVO_PINS.items()
 }
-
+audio = Audio()  # Initialize audio system (real or simulated)
 
 
 # ---------------------------------------------------------
@@ -57,6 +59,39 @@ def ping():
     """
     return jsonify({"status": "ok"})
 
+# -----------------------------
+# Say phrase
+# -----------------------------
+@app.route("/say", methods=["POST"])
+def servo_say():
+    data = request.get_json(silent=True) or {}
+    phrase = data.get("phrase")
+    duration = audio.get_wav_duration(audio._resolve_path("piano2.wav"))
+ 
+    audioThread = audio.play("piano2.wav")  # Start audio in separate thread
+    logging.info("Started audio thread, now controlling beak while audio plays")
+    logging.info(f"checking current_play_obj at start of loop: {audio.current_play_obj}")
+    for _ in range(20):
+        if audio.current_play_obj:
+            logging.info(f"Audio thread ready: {audio.current_play_obj.is_playing()}")
+            break
+        time.sleep(0.01)
+
+    logging.info(f"current_play_obj after wait: {audio.current_play_obj}")
+
+
+
+    while audio.current_play_obj and audio.current_play_obj.is_playing():
+        logging.info("Audio is still playing, opening beak")
+        servos['beak'].open()
+        time.sleep(0.1)
+        logging.info("Closing beak")
+        servos['beak'].close()
+        time.sleep(0.1)
+    logging.info("Audio finished, ensuring beak is closed")
+    servos['beak'].close()
+    return jsonify({ "action": "say", "phrase": phrase})
+
 
 # -----------------------------
 # Basic open/close
@@ -67,16 +102,16 @@ def servo_open(name):
         return jsonify({"error": f"Unknown servo '{name}'"}), 404
 
     # Read optional phrase from JSON body (may be empty or null)
-    data = request.get_json(silent=True) or {}
-    phrase = data.get("phrase")
+    #data = request.get_json(silent=True) or {}
+    #phrase = data.get("phrase")
 
-    if phrase:
-        logging.info(f"Route: /servo/{name}/open -> phrase: {phrase}")
-    else:
-        logging.info(f"Route: /servo/{name}/open -> no phrase provided")
+    #if phrase:
+    #    logging.info(f"Route: /servo/{name}/open -> phrase: {phrase}")
+   # else:
+    #    logging.info(f"Route: /servo/{name}/open -> no phrase provided")
 
     servos[name].open()
-    return jsonify({"servo": name, "action": "open", "phrase": phrase})
+    return jsonify({"servo": name, "action": "open"})
 
 
 @app.route("/servo/<name>/close", methods=["POST"])
@@ -147,7 +182,7 @@ def servo_relax(name):
 # ---------------------------------------------------------
 def start():
     logging.info("Starting Flask server...")
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, threaded=True)
 
 
 if __name__ == "__main__":

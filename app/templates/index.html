@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ParrotPi Control</title>
+    <title>ParrotPi Control v0.1</title>
     <style>
         body {
             font-family: sans-serif;
@@ -19,27 +19,50 @@
             font-size: 18px;
             cursor: pointer;
         }
-        #result {
-            margin-top: 20px;
-            font-size: 16px;
-            color: #333;
-        }
         .section {
             margin-top: 40px;
+        }
+        .diag-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        #responseBox {
+            margin-top: 40px;
+            padding: 15px;
+            border: 1px solid #aaa;
+            width: 80%;
+            margin-left: auto;
+            margin-right: auto;
+            text-align: left;
+            font-family: monospace;
+            white-space: pre-wrap;
         }
     </style>
 </head>
 <body>
 
-    <!-- PING BUTTON -->
+    <!-- PING -->
     <button onclick="ping()">PING</button>
-    <div id="result"></div>
+
+    <!-- DIAGNOSTICS -->
+    <div class="section">
+        <h3>Diagnostics</h3>
+        <div class="diag-row">
+            <button onclick="openBeak()">Open Beak</button>
+            <button onclick="closeBeak()">Close Beak</button>
+            <button onclick="headLeft()">Head Left</button>
+            <button onclick="headRight()">Head Right</button>
+            <button onclick="walkieTalkie()">Walkie Talkie</button>
+        </div>
+    </div>
 
     <!-- MAIN CONTROL ROW -->
     <div class="row section">
         <button onclick="left()">&lt;&lt;</button>
 
-        <!-- Always-visible phrase dropdown -->
         <select id="phraseSelect" onchange="saySelected()">
             <option value="">SAY...</option>
             <option value="Hello">Hello</option>
@@ -51,58 +74,115 @@
         <button onclick="right()">&gt;&gt;</button>
     </div>
 
-    <!-- QUICK PHRASE BUTTONS -->
+    <!-- QUICK PHRASES -->
     <div class="section">
         <button onclick="say('Laugh')">LAUGH</button>
         <button onclick="say('Hello')">HI</button>
     </div>
 
-    <!-- FUTURE LIVE TALK BUTTON -->
+    <!-- FUTURE LIVE TALK -->
     <div class="section">
-        <button onclick="talkLive()">TALK...</button>
+        <button onclick="talkLive()">Walkie Talkie...</button>
     </div>
 
+    <!-- RESPONSE BOX -->
+    <div id="responseBox">RESPONSE: (waiting for command)</div>
+
     <script>
+        function showResponse(label, data) {
+            const box = document.getElementById('responseBox');
+            let formatted = "";
+
+            if (typeof data === "object") {
+                formatted = JSON.stringify(data, null, 2);
+            } else {
+                formatted = data;
+            }
+
+            box.textContent = `RESPONSE (${label}):\n${formatted}`;
+        }
+
+        // --- BASIC PING ---
         function ping() {
             fetch('/ping')
                 .then(r => r.json())
-                .then(data => {
-                    document.getElementById('result').innerText = JSON.stringify(data);
-                })
-                .catch(err => {
-                    document.getElementById('result').innerText = "Error: " + err;
-                });
+                .then(data => showResponse("PING", data))
+                .catch(err => showResponse("PING ERROR", err));
         }
 
+        // --- DIAGNOSTICS ---
+        function openBeak() {
+            fetch('/servo/beak/open', { method: "POST" })
+                .then(r => r.json())
+                .then(data => showResponse("OPEN BEAK", data))
+                .catch(err => showResponse("OPEN BEAK ERROR", err));
+        }
+
+        function closeBeak() {
+            fetch('/servo/beak/close', { method: "POST" })
+                .then(r => r.json())
+                .then(data => showResponse("CLOSE BEAK", data))
+                .catch(err => showResponse("CLOSE BEAK ERROR", err));
+        }
+
+        function headLeft() {
+            fetch('/servo/head/left', { method: "POST" })
+                .then(r => r.json())
+                .then(data => showResponse("HEAD LEFT", data))
+                .catch(err => showResponse("HEAD LEFT ERROR", err));
+        }
+
+        function headRight() {
+            fetch('/servo/head/right', { method: "POST" })
+                .then(r => r.json())
+                .then(data => showResponse("HEAD RIGHT", data))
+                .catch(err => showResponse("HEAD RIGHT ERROR", err));
+        }
+
+        function walkieTalkie() {
+            fetch('/talk/walkietalkie', { method: "POST" })
+                .then(r => r.json())
+                .then(data => showResponse("WALKIE TALKIE", data))
+                .catch(err => showResponse("WALKIE TALKIE ERROR", err));
+        }
+
+        // --- SAY ---
         function saySelected() {
             const phrase = document.getElementById('phraseSelect').value;
             if (phrase) say(phrase);
         }
 
         function say(phrase) {
-            console.log("SAY:", phrase);
-
-            // Simple placeholder: open beak, wait, close
-                fetch('/servo/beak/open', {
-                    method: "POST",
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phrase: phrase })
-                })
-                    .then(() => setTimeout(() => {
-                    fetch('/servo/beak/close', { method: "POST" })
-                }, 300));
+            fetch('/say', {
+                method: "POST",
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phrase })
+            })
+            .then(r => r.json())
+            .then(data => {
+                showResponse(`SAY (${phrase})`, data);
+                
+            })
+            .catch(err => showResponse("SAY ERROR", err));
         }
 
+        // --- MOVEMENT BUTTONS ---
         function left() {
-            console.log("LEFT button clicked");
+            fetch('/servo/head/left', { method: "POST" })
+                .then(r => r.json())
+                .then(data => showResponse("LEFT BUTTON", data))
+                .catch(err => showResponse("LEFT ERROR", err));
         }
 
         function right() {
-            console.log("RIGHT button clicked");
+            fetch('/servo/head/right', { method: "POST" })
+                .then(r => r.json())
+                .then(data => showResponse("RIGHT BUTTON", data))
+                .catch(err => showResponse("RIGHT ERROR", err));
         }
 
         function talkLive() {
-            console.log("TALK... (future live voice streaming)");
+            showResponse("TALK LIVE", "Future feature...");
         }
     </script>
 
