@@ -8,6 +8,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 optionally edit config.py (e.g. set simulation mode)
 python3 server.py
+User can hit the sever over browse by https://parrotpi.local (serves over caddy)
 For tech information, see claude.md file
 ```
 
@@ -62,7 +63,12 @@ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --d
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
 sudo apt update
 sudo apt install caddy
-
+8) create caddyfile:
+sudo vi /etc/caddy/Caddyfile
+Insert this text and save:
+parrotpi.local {
+    reverse_proxy localhost:5000
+}
 
 
 
