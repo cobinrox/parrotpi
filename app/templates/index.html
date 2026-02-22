@@ -50,7 +50,19 @@
     z-index: 1;
 }
 
-/* glow and pulse when walkie talkie button is being pressed */
+/* Active transmit mode */
+#talkButton.talking {
+    background-color: #d40000;
+    color: white;
+    border-color: #ff8080;
+    box-shadow:
+        0 0 10px rgba(255, 0, 0, 0.7),
+        0 0 20px rgba(255, 0, 0, 0.5),
+        0 0 30px rgba(255, 0, 0, 0.3);
+    animation: pulseGlow 1.2s infinite ease-in-out;
+}
+
+/* Pulsing halo animation */
 @keyframes pulseGlow {
     0% {
         box-shadow:
@@ -70,7 +82,7 @@
             0 0 16px rgba(255, 0, 0, 0.3),
             0 0 24px rgba(255, 0, 0, 0.2);
     }
-}        
+}    
     </style>
 </head>
 <body>
@@ -92,7 +104,7 @@
     onmouseleave="stopTalking()"
     ontouchstart="startTalking()"
     ontouchend="stopTalking()">
-    Walkie Talkie
+    Hold to Talk
 </button>
         </div>
     </div>
@@ -126,7 +138,7 @@
     onmouseleave="stopTalking()"
     ontouchstart="startTalking()"
     ontouchend="stopTalking()">
-    Walkie Talkie
+    Hold to Talk
 </button>
     </div>
 
@@ -230,61 +242,54 @@
     // }
 
  
-    
-
 async function startTalking() {
-    // If the mic is already active, do nothing (prevents double‑start)
     if (isTalking) return;
 
     try {
-        // Ask the browser for access to the microphone and wait for permission.
-        // Returns a live audio stream from the device's mic.
+        // Request microphone access
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-        // Create a MediaRecorder that will encode the audio stream into WebM chunks.
-        // This recorder will fire "dataavailable" events with small audio blobs.
+        // Create recorder for WebM audio chunks
         mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
 
-        // Every time the recorder has a chunk of audio ready, this function runs.
+        // Send each chunk to the server
         mediaRecorder.ondataavailable = async (event) => {
-
-            // Ignore empty chunks (can happen on some browsers)
             if (event.data.size > 0) {
-
-                // Convert the Blob into a raw ArrayBuffer so it can be sent over WebSocket
                 const buffer = await event.data.arrayBuffer();
-
-                // Send the audio chunk to the server via Socket.IO
                 socket.emit("mic_chunk", { audio: buffer });
             }
         };
 
-        // Start recording and tell the recorder to emit a chunk every 100ms
+        // Start recording, emit chunks every 100ms
         mediaRecorder.start(100);
 
-        // (You asked to skip commenting this line)
+        // Mark as active
         isTalking = true;
 
-        // Add the CSS class that turns the button red + glowing
-        document.getElementById("talkButton").classList.add("talking");
+        // Visual + text feedback
+        const btn = document.getElementById("talkButton");
+        btn.classList.add("talking");
+        btn.textContent = "Talking…";
 
-        // Update the UI so the user knows the mic is live
         showResponse("WALKIE TALKIE", "Talking (hold to talk)");
 
     } catch (err) {
-
-        // If anything goes wrong (permissions, unsupported browser, etc.)
-        // show the error in your response box
         showResponse("WALKIE TALKIE ERROR", err.toString());
     }
 }
+
 function stopTalking() {
     if (!isTalking) return;
 
+    // Stop recording
     mediaRecorder.stop();
     isTalking = false;
 
-    document.getElementById("talkButton").classList.remove("talking");
+    // Restore button visuals + text
+    const btn = document.getElementById("talkButton");
+    btn.classList.remove("talking");
+    btn.textContent = "Hold to Talk";
+
     showResponse("WALKIE TALKIE", "Stopped talking");
 }
 </script>
