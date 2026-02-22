@@ -40,6 +40,37 @@
             font-family: monospace;
             white-space: pre-wrap;
         }
+#talkButton {
+    padding: 14px 24px;
+    font-size: 20px;
+    border-radius: 12px;
+    border: 2px solid #444;
+    transition: all 0.2s ease;
+    position: relative;
+    z-index: 1;
+}
+
+/* glow and pulse when walkie talkie button is being pressed */
+@keyframes pulseGlow {
+    0% {
+        box-shadow:
+            0 0 8px rgba(255, 0, 0, 0.5),
+            0 0 16px rgba(255, 0, 0, 0.3),
+            0 0 24px rgba(255, 0, 0, 0.2);
+    }
+    50% {
+        box-shadow:
+            0 0 16px rgba(255, 0, 0, 0.9),
+            0 0 28px rgba(255, 0, 0, 0.7),
+            0 0 40px rgba(255, 0, 0, 0.5);
+    }
+    100% {
+        box-shadow:
+            0 0 8px rgba(255, 0, 0, 0.5),
+            0 0 16px rgba(255, 0, 0, 0.3),
+            0 0 24px rgba(255, 0, 0, 0.2);
+    }
+}        
     </style>
 </head>
 <body>
@@ -55,13 +86,20 @@
             <button onclick="closeBeak()">Close Beak</button>
             <button onclick="headLeft()">Head Left</button>
             <button onclick="headRight()">Head Right</button>
-            <button onclick="talkLive()">Walkie Talkie</button>
+            <button id="talkButton"
+    onmousedown="startTalking()"
+    onmouseup="stopTalking()"
+    onmouseleave="stopTalking()"
+    ontouchstart="startTalking()"
+    ontouchend="stopTalking()">
+    Walkie Talkie
+</button>
         </div>
     </div>
 
     <!-- MAIN CONTROL ROW -->
     <div class="row section">
-        <button onclick="left()">&lt;&lt;</button>
+        <button onclick="headLeft()">&lt;&lt;</button>
 
         <select id="phraseSelect" onchange="saySelected()">
             <option value="">SAY...</option>
@@ -71,7 +109,7 @@
             <option value="Laugh">Laugh</option>
         </select>
 
-        <button onclick="right()">&gt;&gt;</button>
+        <button onclick="headRight()">&gt;&gt;</button>
     </div>
 
     <!-- QUICK PHRASES -->
@@ -80,9 +118,16 @@
         <button onclick="say('Hello')">HI</button>
     </div>
 
-    <!-- FUTURE LIVE TALK -->
+    <!-- LIVE TALK -->
     <div class="section">
-        <button onclick="talkLive()">Walkie Talkie...</button>
+        <button id="talkButton"
+    onmousedown="startTalking()"
+    onmouseup="stopTalking()"
+    onmouseleave="stopTalking()"
+    ontouchstart="startTalking()"
+    ontouchend="stopTalking()">
+    Walkie Talkie
+</button>
     </div>
 
     <!-- RESPONSE BOX -->
@@ -111,48 +156,54 @@
 
     // --- BASIC PING ---
     function ping() {
+        console.log("Sending ping request...");
         fetch('/ping')
             .then(r => r.json())
             .then(data => showResponse("PING", data))
             .catch(err => showResponse("PING ERROR", err));
     }
 
-    // --- DIAGNOSTICS ---
+    // --- OPEN BEAK ---
     function openBeak() {
+        console.log("Sending open beak command...");
         fetch('/servo/beak/open', { method: "POST" })
             .then(r => r.json())
             .then(data => showResponse("OPEN BEAK", data))
             .catch(err => showResponse("OPEN BEAK ERROR", err));
     }
-
+    // --- CLOSE BEAK ---
     function closeBeak() {
+        console
         fetch('/servo/beak/close', { method: "POST" })
             .then(r => r.json())
             .then(data => showResponse("CLOSE BEAK", data))
             .catch(err => showResponse("CLOSE BEAK ERROR", err));
     }
-
+    // --- HEAD LEFT
     function headLeft() {
+        console.log("Sending head left command...");
         fetch('/servo/head/left', { method: "POST" })
             .then(r => r.json())
             .then(data => showResponse("HEAD LEFT", data))
             .catch(err => showResponse("HEAD LEFT ERROR", err));
     }
-
+    // HEAD RIGHT
     function headRight() {
+        console.log
         fetch('/servo/head/right', { method: "POST" })
             .then(r => r.json())
             .then(data => showResponse("HEAD RIGHT", data))
             .catch(err => showResponse("HEAD RIGHT ERROR", err));
     }
 
-    // --- SAY ---
-    function saySelected() {
+    function saySelected() {    
         const phrase = document.getElementById('phraseSelect').value;
         if (phrase) say(phrase);
     }
 
+    // SAY A PHRASE
     function say(phrase) {
+        console.log(`Sending SAY command with phrase: ${phrase}`);
         fetch('/say', {
             method: "POST",
             headers: { 'Content-Type': 'application/json' },
@@ -163,51 +214,79 @@
         .catch(err => showResponse("SAY ERROR", err));
     }
 
-    // --- MOVEMENT BUTTONS ---
-    function left() {
-        fetch('/servo/head/left', { method: "POST" })
-            .then(r => r.json())
-            .then(data => showResponse("LEFT BUTTON", data))
-            .catch(err => showResponse("LEFT ERROR", err));
+    // // --- MOVEMENT BUTTONS ---
+    // function left() {
+    //     fetch('/servo/head/left', { method: "POST" })
+    //         .then(r => r.json())
+    //         .then(data => showResponse("LEFT BUTTON", data))
+    //         .catch(err => showResponse("LEFT ERROR", err));
+    // }
+
+    // function right() {
+    //     fetch('/servo/head/right', { method: "POST" })
+    //         .then(r => r.json())
+    //         .then(data => showResponse("RIGHT BUTTON", data))
+    //         .catch(err => showResponse("RIGHT ERROR", err));
+    // }
+
+ 
+    
+
+async function startTalking() {
+    // If the mic is already active, do nothing (prevents double‑start)
+    if (isTalking) return;
+
+    try {
+        // Ask the browser for access to the microphone and wait for permission.
+        // Returns a live audio stream from the device's mic.
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        // Create a MediaRecorder that will encode the audio stream into WebM chunks.
+        // This recorder will fire "dataavailable" events with small audio blobs.
+        mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+
+        // Every time the recorder has a chunk of audio ready, this function runs.
+        mediaRecorder.ondataavailable = async (event) => {
+
+            // Ignore empty chunks (can happen on some browsers)
+            if (event.data.size > 0) {
+
+                // Convert the Blob into a raw ArrayBuffer so it can be sent over WebSocket
+                const buffer = await event.data.arrayBuffer();
+
+                // Send the audio chunk to the server via Socket.IO
+                socket.emit("mic_chunk", { audio: buffer });
+            }
+        };
+
+        // Start recording and tell the recorder to emit a chunk every 100ms
+        mediaRecorder.start(100);
+
+        // (You asked to skip commenting this line)
+        isTalking = true;
+
+        // Add the CSS class that turns the button red + glowing
+        document.getElementById("talkButton").classList.add("talking");
+
+        // Update the UI so the user knows the mic is live
+        showResponse("WALKIE TALKIE", "Talking (hold to talk)");
+
+    } catch (err) {
+
+        // If anything goes wrong (permissions, unsupported browser, etc.)
+        // show the error in your response box
+        showResponse("WALKIE TALKIE ERROR", err.toString());
     }
+}
+function stopTalking() {
+    if (!isTalking) return;
 
-    function right() {
-        fetch('/servo/head/right', { method: "POST" })
-            .then(r => r.json())
-            .then(data => showResponse("RIGHT BUTTON", data))
-            .catch(err => showResponse("RIGHT ERROR", err));
-    }
+    mediaRecorder.stop();
+    isTalking = false;
 
-    // --- WALKIE TALKIE (WEBSOCKETS) ---
-    async function talkLive() {
-        if (isTalking) {
-            // Stop recording
-            isTalking = false;
-            mediaRecorder.stop();
-            showResponse("WALKIE TALKIE", "Stopped talking");
-            return;
-        }
-
-        // Start recording
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-
-            mediaRecorder.ondataavailable = async (event) => {
-                if (event.data.size > 0) {
-                    const buffer = await event.data.arrayBuffer();
-                    socket.emit("mic_chunk", { audio: buffer });
-                }
-            };
-
-            mediaRecorder.start(100); // send audio every 100ms
-            isTalking = true;
-            showResponse("WALKIE TALKIE", "Streaming microphone audio...");
-
-        } catch (err) {
-            showResponse("WALKIE TALKIE ERROR", err.toString());
-        }
-    }
+    document.getElementById("talkButton").classList.remove("talking");
+    showResponse("WALKIE TALKIE", "Stopped talking");
+}
 </script>
 </body>
 </html>

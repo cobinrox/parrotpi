@@ -138,6 +138,7 @@ def ping():
       200:
         description: OK
     """
+    logging.info("Received ping request")
     return jsonify({"status": "ok"})
 
 # -----------------------------
@@ -148,10 +149,12 @@ def servo_say():
     data = request.get_json(silent=True) or {}
     phrase = data.get("phrase")
     duration = audio.get_wav_duration(audio._resolve_path("piano2.wav"))
- 
+    logging.info(f"Received SAY request for phrase: [%s], duration [%s]", phrase, duration.toString())
+
     audioThread = audio.play("piano2.wav")  # Start audio in separate thread
     logging.info("Started audio thread, now controlling beak while audio plays")
     logging.info(f"checking current_play_obj at start of loop: {audio.current_play_obj}")
+    # Wait until current_play_obj is set by the audio thread (with a timeout)
     for _ in range(20):
         if audio.current_play_obj:
             logging.info(f"Audio thread ready: {audio.current_play_obj.is_playing()}")
