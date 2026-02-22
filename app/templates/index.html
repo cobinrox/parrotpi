@@ -242,10 +242,17 @@
     // }
 
  
+    // --- TALK BUTTON ---
+    //   Every 100ms, the MediaRecorder produces a small WebM/Opus audio chunk.
+    //Each chunk is sent over the WebSocket connection using the event name mic_chunk. 
+    // 
 async function startTalking() {
     if (isTalking) return;
 
     try {
+        socket.emit("mic_start");
+
+
         // Request microphone access
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
@@ -291,6 +298,7 @@ function stopTalking() {
     btn.textContent = "Hold to Talk";
 
     showResponse("WALKIE TALKIE", "Stopped talking");
+    socket.emit("mic_stop");
 }
 </script>
 </body>

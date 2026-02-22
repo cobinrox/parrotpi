@@ -14,18 +14,28 @@ from flask_socketio import SocketIO, emit
 from .controller import Servo # import either sim or real hw servo based on config
 from .controller import Audio # import either sim or real hw audio based on config
 from .config import SERVO_PINS
+import threading
+import queue
 
 import logging
 import time
 import numpy as np
 import sounddevice as sd
+# Queues for pipeline
+opus_queue = queue.Queue(maxsize=50)   # incoming Opus chunks
+pcm_queue = queue.Queue(maxsize=50)    # decoded PCM chunks
 
+smoothed_amp = 0.0
+last_update = time.time()
+mic_active = False
 #decoder = av.CodecContext.create("opus", "r")
-
+#from threading import Lock
+#ffmpeg_lock = Lock()
 ffmpeg = subprocess.Popen(
     [
         "ffmpeg",
         "-loglevel", "quiet",
+        "-f", "webm",
         "-i", "pipe:0",
         "-f", "f32le",
         "-acodec", "pcm_f32le",
@@ -35,8 +45,58 @@ ffmpeg = subprocess.Popen(
     ],
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
+    bufsize=0
 )
+def ffmpeg_writer():
+    while True and mic_active:
+        chunk = opus_queue.get()  # wait for next Opus chunk
+        try:
+            ffmpeg.stdin.write(chunk)
+        except Exception as e:
+            logging.error(f"FFmpeg writer error: {e}")
 
+threading.Thread(target=ffmpeg_writer, daemon=True).start()
+def ffmpeg_reader():
+    while True:
+        try:
+            # Read whatever PCM is available
+            pcm_bytes = ffmpeg.stdout.read(4096)
+
+            if pcm_bytes:
+                pcm_queue.put(pcm_bytes)
+        except Exception as e:
+            logging.error(f"FFmpeg reader error: {e}")
+threading.Thread(target=ffmpeg_reader, daemon=True).start()
+
+def audio_and_beak_worker():
+    global smoothed_amp, last_update
+
+    while True and mic_active:
+        try:
+            pcm_bytes = pcm_queue.get()  # wait for PCM chunk
+
+            # Convert to float32 samples
+            pcm = np.frombuffer(pcm_bytes, dtype=np.float32)
+
+            # Play audio
+            audio_stream.write(pcm)
+
+            # Compute amplitude
+            amplitude = np.abs(pcm).mean()
+            smoothed_amp = 0.8 * smoothed_amp + 0.2 * amplitude
+
+            # Update beak at 20 Hz
+            now = time.time()
+            if now - last_update > 0.05:
+                last_update = now
+                if smoothed_amp > 0.02:
+                    servos['beak'].open()
+                else:
+                    servos['beak'].close()
+
+        except Exception as e:
+            logging.error(f"Audio/beak worker error: {e}")
+threading.Thread(target=audio_and_beak_worker, daemon=True).start()
 audio_stream = sd.OutputStream(samplerate=48000, channels=1)
 audio_stream.start()
 
@@ -71,41 +131,41 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 smoothed_amp = 0.0
 last_update = time.time()
 
+# So this function runs every 100ms while the user is holding the Walkie‑Talkie button
 @socketio.on('mic_chunk')
 def handle_mic_chunk(data):
-    global smoothed_amp, last_update
+    logging.debug(f"Received mic_chunk of size {len(data['audio'])} bytes")
+    global mic_active
+    if not mic_active:
+        return  # ignore late chunks
+    opus_queue.put_nowait(data['audio'])
 
-    audio_bytes = data['audio']
+@socketio.on('mic_start')
+def handle_mic_start():
+    logging.info("Received mic_start from client")
+    global mic_active
+    mic_active = True
 
-    try:
-        # Feed WebM/Opus chunk to FFmpeg
-        ffmpeg.stdin.write(audio_bytes)
+@socketio.on('mic_stop')
+def handle_mic_stop():
+    global mic_active, smoothed_amp, last_update
 
-        # Read decoded PCM (float32)
-        pcm = ffmpeg.stdout.read(len(audio_bytes) * 4)
-        if not pcm:
-            return
+    mic_active = False
+    logging.info("Received mic_stop from client")
 
-        pcm = np.frombuffer(pcm, dtype=np.float32)
+    # Clear queues
+    while not opus_queue.empty():
+        try: opus_queue.get_nowait()
+        except queue.Empty: break
 
-        # Play audio
-        audio_stream.write(pcm)
+    while not pcm_queue.empty():
+        try: pcm_queue.get_nowait()
+        except queue.Empty: break
 
-        # Compute amplitude
-        amplitude = np.abs(pcm).mean()
-        smoothed_amp = 0.8 * smoothed_amp + 0.2 * amplitude
-
-        # Update beak at 20 Hz
-        now = time.time()
-        if now - last_update > 0.05:
-            last_update = now
-            if smoothed_amp > 0.02:
-                servos['beak'].open()
-            else:
-                servos['beak'].close()
-
-    except Exception as e:
-        logging.error(f"Decode error: {e}")
+    # Reset amplitude and close beak
+    smoothed_amp = 0.0
+    last_update = time.time()
+    servos['beak'].close()
 # ---------------------------------------------------------
 # Servo Initialization
 # ---------------------------------------------------------
@@ -149,7 +209,7 @@ def servo_say():
     data = request.get_json(silent=True) or {}
     phrase = data.get("phrase")
     duration = audio.get_wav_duration(audio._resolve_path("piano2.wav"))
-    logging.info(f"Received SAY request for phrase: [%s], duration [%s]", phrase, duration.toString())
+    logging.info(f"Received SAY request for phrase: [%s], duration [%s]", phrase, duration)
 
     audioThread = audio.play("piano2.wav")  # Start audio in separate thread
     logging.info("Started audio thread, now controlling beak while audio plays")
