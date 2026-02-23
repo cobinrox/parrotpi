@@ -172,7 +172,7 @@ def handle_mic_start():
 
     print("PID:", os.getpid())
     print("mic_active before:", mic_active)
-    logging.info("Received mic_start from client")
+    logging.info("1. Received mic_start from client")
     mic_active = True
 
 @socketio.on('mic_stop')
