@@ -1,9 +1,12 @@
+import os
 import eventlet
 eventlet.monkey_patch()
 import subprocess
 import numpy as np
 import sounddevice as sd
 import time
+import traceback
+
 
 from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
@@ -31,11 +34,15 @@ mic_active = False
 #decoder = av.CodecContext.create("opus", "r")
 #from threading import Lock
 #ffmpeg_lock = Lock()
+logging.info("Starting FFmpeg subprocess for Opus decoding")
+
+
 ffmpeg = subprocess.Popen(
     [
         "ffmpeg",
-        "-loglevel", "quiet",
-        "-f", "webm",
+        "-loglevel", "info",
+        "-fflags", "+genpts",
+        "-f", "ogg",
         "-i", "pipe:0",
         "-f", "f32le",
         "-acodec", "pcm_f32le",
@@ -47,15 +54,22 @@ ffmpeg = subprocess.Popen(
     stdout=subprocess.PIPE,
     bufsize=0
 )
+
 def ffmpeg_writer():
-    while True and mic_active:
+    while True :
         chunk = opus_queue.get()  # wait for next Opus chunk
+        print("3. QUEUE SIZE AFTER OPUS GET:", opus_queue.qsize())
+
+        logging.info(f"3. Got Opus chunk of size {len(chunk)} bytes from queue")
         try:
             ffmpeg.stdin.write(chunk)
+            ffmpeg.stdin.flush()
         except Exception as e:
             logging.error(f"FFmpeg writer error: {e}")
 
-threading.Thread(target=ffmpeg_writer, daemon=True).start()
+#threading.Thread(target=ffmpeg_writer, daemon=True).start()
+#socketio.start_background_task(ffmpeg_writer)
+
 def ffmpeg_reader():
     while True:
         try:
@@ -63,13 +77,16 @@ def ffmpeg_reader():
             pcm_bytes = ffmpeg.stdout.read(4096)
 
             if pcm_bytes:
+                logging.info(f"4. queuing pcm_bytes")
                 pcm_queue.put(pcm_bytes)
         except Exception as e:
-            logging.error(f"FFmpeg reader error: {e}")
-threading.Thread(target=ffmpeg_reader, daemon=True).start()
+            logging.error(f"FFmpeg reader error: {e}")#
+#threading.Thread(target=ffmpeg_reader, daemon=True).start()
+#socketio.start_background_task(ffmpeg_reader)
+
 
 def audio_and_beak_worker():
-    global smoothed_amp, last_update
+    global smoothed_amp, last_update, mic_active
 
     while True and mic_active:
         try:
@@ -103,15 +120,6 @@ audio_stream.start()
 smoothed_amp = 0.0
 last_update = time.time()
 
-
-
-
-# ---------------------------------------------------------
-# socketio setup for receiving mic audio chunks (not fully implemented yet)
-# ---------------------------------------------------------
-
-
-
 # ---------------------------------------------------------
 # Logging Setup
 # ---------------------------------------------------------
@@ -128,22 +136,43 @@ app = Flask(__name__)
 CORS(app)
 swagger = Swagger(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
+socketio.start_background_task(ffmpeg_writer)
+socketio.start_background_task(ffmpeg_reader)
+
 smoothed_amp = 0.0
 last_update = time.time()
 
 # So this function runs every 100ms while the user is holding the Walkie‑Talkie button
 @socketio.on('mic_chunk')
 def handle_mic_chunk(data):
-    logging.debug(f"Received mic_chunk of size {len(data['audio'])} bytes")
+ try:
     global mic_active
-    if not mic_active:
-        return  # ignore late chunks
-    opus_queue.put_nowait(data['audio'])
 
+    print("PID:", os.getpid())
+    print("mic_active before:", mic_active)
+    #logging.info(f"mic_chunk received: {type(data)} -> {data}")
+    logging.info("2. mic_chunk rxd")
+    print("TYPE:", type(data["audio"]))
+    print("LEN:", len(data["audio"]))
+    #logging.debug(f"Received mic_chunk of size {len(data['audio'])} bytes")
+    if not mic_active:
+        logging.warning("Received mic_chunk while mic is inactive, ignoring")
+        return  # ignore late chunks
+    audio_bytes = bytes(data["audio"])
+    logging.info(f"Queuing mic_chunk of {len(audio_bytes)} bytes")        
+    opus_queue.put_nowait(audio_bytes)
+    logging.info(f"QUEUE SIZE after opus q put: {opus_queue.qsize()}")
+
+ except Exception as e:
+        print("ERROR IN mic_chunk:")
+        traceback.print_exc()
 @socketio.on('mic_start')
 def handle_mic_start():
-    logging.info("Received mic_start from client")
     global mic_active
+
+    print("PID:", os.getpid())
+    print("mic_active before:", mic_active)
+    logging.info("Received mic_start from client")
     mic_active = True
 
 @socketio.on('mic_stop')

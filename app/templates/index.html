@@ -104,7 +104,7 @@
     onmouseleave="stopTalking()"
     ontouchstart="startTalking()"
     ontouchend="stopTalking()">
-    Hold to Talk
+    Push to Talk
 </button>
         </div>
     </div>
@@ -138,7 +138,7 @@
     onmouseleave="stopTalking()"
     ontouchstart="startTalking()"
     ontouchend="stopTalking()">
-    Hold to Talk
+    Push to Talk
 </button>
     </div>
 
@@ -146,6 +146,7 @@
     <div id="responseBox">RESPONSE: (waiting for command)</div>
 
  <!--script src="/socket.io/socket.io.js"></script-->
+ <!-- W A R N I N G    C D N   -->
 <script src="https://cdn.socket.io/3.1.3/socket.io.min.js"></script> 
 <script>
     const socket = io();   // Connect to Flask-SocketIO backend
@@ -251,23 +252,53 @@ async function startTalking() {
 
     try {
         socket.emit("mic_start");
+        // wait a bit for the server to be ready before sending audio
+        await new Promise(r => setTimeout(r, 200));
 
 
         // Request microphone access
+        console.log("Requesting microphone access...");
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log("... got mic access");
 
         // Create recorder for WebM audio chunks
-        mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+        //mediaRecorder = new MediaRecorder(stream, {     mimeType: "audio/ogg;codecs=opus" });
+
+let mimeType = null;
+
+if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+    mimeType = "audio/webm;codecs=opus";
+} else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {
+    mimeType = "audio/ogg;codecs=opus";
+} else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+    mimeType = "audio/mp4";   // Safari fallback
+} else {
+    throw new Error("No supported audio format");
+}
+
+console.log("Using mimeType:", mimeType);
+
+mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+        console.log("MediaRecorder created:", mediaRecorder);
 
         // Send each chunk to the server
+        console.log("Setting up dataavailable handler...");
         mediaRecorder.ondataavailable = async (event) => {
+            console.log("Audio chunk available:", event.data);
+            const buffer = await event.data.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+
+            socket.emit("mic_chunk", { audio: buffer });            
             if (event.data.size > 0) {
                 const buffer = await event.data.arrayBuffer();
+                console.log(`Emitting mic_chunk with ${buffer.byteLength} bytes`);
                 socket.emit("mic_chunk", { audio: buffer });
             }
         };
 
         // Start recording, emit chunks every 100ms
+        console.log("Starting media recording...");
         mediaRecorder.start(100);
 
         // Mark as active
