@@ -98,8 +98,8 @@ async function startMic() {
 
           console.log("audio firing", input[0]);
 
-            socket.emit("mic_chunk", { audio: input.buffer });
-
+            //socket.emit("mic_chunk", { audio: input.buffer });
+            socket.emit("mic_chunk", { audio: input.slice() });
             const amp = computeRMS(input);
             beak.style.transform = `scaleY(${0.5 + amp * 5})`;
 
