@@ -1,48 +1,50 @@
 import os
 import eventlet
 eventlet.monkey_patch()
+
 import subprocess
 import numpy as np
 import sounddevice as sd
 import time
 import traceback
-
+import threading
+import queue
+import logging
 
 from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 from flasgger import Swagger
 from flask_socketio import SocketIO, emit
 
-
-from .controller import Servo # import either sim or real hw servo based on config
-from .controller import Audio # import either sim or real hw audio based on config
+from .controller import Servo
+from .controller import Audio
 from .config import SERVO_PINS
-import threading
-import queue
 
-import logging
-import time
-import numpy as np
-import sounddevice as sd
-# Queues for pipeline
-opus_queue = queue.Queue(maxsize=50)   # incoming Opus chunks
-pcm_queue = queue.Queue(maxsize=50)    # decoded PCM chunks
+print("DEVICES:", sd.query_devices())
+print("DEFAULT DEVICE:", sd.default.device)
 
+# ---------------------------------------------------------
+# Global State
+# ---------------------------------------------------------
+opus_queue = queue.Queue(maxsize=50)
+pcm_queue = queue.Queue(maxsize=50)
+
+mic_active = False
 smoothed_amp = 0.0
 last_update = time.time()
-mic_active = False
-#decoder = av.CodecContext.create("opus", "r")
-#from threading import Lock
-#ffmpeg_lock = Lock()
-logging.info("Starting FFmpeg subprocess for Opus decoding")
 
+
+# ---------------------------------------------------------
+# FFmpeg Setup (Opus → PCM Float32)
+# ---------------------------------------------------------
+logging.info("Starting FFmpeg subprocess for Opus decoding")
 
 ffmpeg = subprocess.Popen(
     [
         "ffmpeg",
         "-loglevel", "info",
         "-fflags", "+genpts",
-        "-f", "ogg",
+        "-f", "webm",
         "-i", "pipe:0",
         "-f", "f32le",
         "-acodec", "pcm_f32le",
@@ -55,51 +57,68 @@ ffmpeg = subprocess.Popen(
     bufsize=0
 )
 
-def ffmpeg_writer():
-    while True :
-        chunk = opus_queue.get()  # wait for next Opus chunk
-        print("3. QUEUE SIZE AFTER OPUS GET:", opus_queue.qsize())
 
-        logging.info(f"3. Got Opus chunk of size {len(chunk)} bytes from queue")
+def ffmpeg_writer():
+    while True:
+        chunk = opus_queue.get()
+        logging.info(f"3. Got Opus chunk of size {len(chunk)} bytes")
         try:
             ffmpeg.stdin.write(chunk)
             ffmpeg.stdin.flush()
         except Exception as e:
             logging.error(f"FFmpeg writer error: {e}")
 
-#threading.Thread(target=ffmpeg_writer, daemon=True).start()
-#socketio.start_background_task(ffmpeg_writer)
 
 def ffmpeg_reader():
     while True:
         try:
-            # Read whatever PCM is available
             pcm_bytes = ffmpeg.stdout.read(4096)
-
             if pcm_bytes:
-                logging.info(f"4. queuing pcm_bytes")
                 pcm_queue.put(pcm_bytes)
         except Exception as e:
-            logging.error(f"FFmpeg reader error: {e}")#
-#threading.Thread(target=ffmpeg_reader, daemon=True).start()
-#socketio.start_background_task(ffmpeg_reader)
+            logging.error(f"FFmpeg reader error: {e}")
 
 
+# ---------------------------------------------------------
+# Audio Output (Headset) — Option A: int16 RawOutputStream
+# ---------------------------------------------------------
+audio_stream = sd.RawOutputStream(
+    samplerate=48000,
+    channels=1,
+    dtype="int16",      # IMPORTANT: raw int16 bytes
+    blocksize=1024
+)
+audio_stream.start()
+def play_test_tone():
+    import math
+    sr = audio_stream.samplerate
+    t = np.linspace(0, 1, int(sr), endpoint=False)
+    tone = 0.2 * np.sin(2 * math.pi * 440 * t)  # 440 Hz
+    int16_tone = np.int16(tone * 32767).tobytes()
+    audio_stream.write(int16_tone)
+
+play_test_tone()
+
+
+
+# ---------------------------------------------------------
+# Background Worker: Play PCM + Move Beak
+# ---------------------------------------------------------
 def audio_and_beak_worker():
     global smoothed_amp, last_update, mic_active
 
-    while True and mic_active:
+    while True:
         try:
-            pcm_bytes = pcm_queue.get()  # wait for PCM chunk
+            pcm_bytes = pcm_queue.get()
 
-            # Convert to float32 samples
-            pcm = np.frombuffer(pcm_bytes, dtype=np.float32)
+            # Convert PCM bytes → float32 for amplitude analysis
+            pcm_float = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32767.0
 
-            # Play audio
-            audio_stream.write(pcm)
+            # Play audio (int16 bytes)
+            audio_stream.write(pcm_bytes)
 
             # Compute amplitude
-            amplitude = np.abs(pcm).mean()
+            amplitude = np.abs(pcm_float).mean()
             smoothed_amp = 0.8 * smoothed_amp + 0.2 * amplitude
 
             # Update beak at 20 Hz
@@ -113,67 +132,43 @@ def audio_and_beak_worker():
 
         except Exception as e:
             logging.error(f"Audio/beak worker error: {e}")
+
+
 threading.Thread(target=audio_and_beak_worker, daemon=True).start()
-audio_stream = sd.OutputStream(samplerate=48000, channels=1)
-audio_stream.start()
 
-smoothed_amp = 0.0
-last_update = time.time()
 
 # ---------------------------------------------------------
-# Logging Setup
+# Flask + SocketIO Setup
 # ---------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
-logging.info("Starting server.py")
-
-# ---------------------------------------------------------
-# Flask Setup
-# ---------------------------------------------------------
+logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 CORS(app)
 swagger = Swagger(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
+
 socketio.start_background_task(ffmpeg_writer)
 socketio.start_background_task(ffmpeg_reader)
 
-smoothed_amp = 0.0
-last_update = time.time()
 
-# So this function runs every 100ms while the user is holding the Walkie‑Talkie button
-@socketio.on('mic_chunk')
-def handle_mic_chunk(data):
- try:
-    global mic_active
+# ---------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------
+def float32_to_int16(float32_bytes):
+    """Convert WebAudio float32 PCM → int16 PCM bytes."""
+    float32_array = np.frombuffer(float32_bytes, dtype=np.float32)
+    int16_array = np.int16(float32_array * 32767)
+    return int16_array.tobytes()
 
-    print("PID:", os.getpid())
-    print("mic_active before:", mic_active)
-    #logging.info(f"mic_chunk received: {type(data)} -> {data}")
-    logging.info("2. mic_chunk rxd")
-    print("TYPE:", type(data["audio"]))
-    print("LEN:", len(data["audio"]))
-    #logging.debug(f"Received mic_chunk of size {len(data['audio'])} bytes")
-    if not mic_active:
-        logging.warning("Received mic_chunk while mic is inactive, ignoring")
-        return  # ignore late chunks
-    audio_bytes = bytes(data["audio"])
-    logging.info(f"Queuing mic_chunk of {len(audio_bytes)} bytes")        
-    opus_queue.put_nowait(audio_bytes)
-    logging.info(f"QUEUE SIZE after opus q put: {opus_queue.qsize()}")
 
- except Exception as e:
-        print("ERROR IN mic_chunk:")
-        traceback.print_exc()
+# ---------------------------------------------------------
+# Socket.IO Handlers
+# ---------------------------------------------------------
 @socketio.on('mic_start')
 def handle_mic_start():
     global mic_active
-
-    print("PID:", os.getpid())
-    print("mic_active before:", mic_active)
     logging.info("1. Received mic_start from client")
     mic_active = True
+
 
 @socketio.on('mic_stop')
 def handle_mic_stop():
@@ -191,10 +186,63 @@ def handle_mic_stop():
         try: pcm_queue.get_nowait()
         except queue.Empty: break
 
-    # Reset amplitude and close beak
     smoothed_amp = 0.0
     last_update = time.time()
     servos['beak'].close()
+
+
+@socketio.on('mic_chunk')
+def handle_mic_chunk(data):
+    global mic_active
+    # # Fake a loud 440 Hz tone instead of using browser audio just for testing/
+    # troubleshooting
+    # import math
+    # sr = 48000
+    # t = np.linspace(0, 0.1, int(sr * 0.1), endpoint=False)  # 100 ms
+    # tone = 0.5 * np.sin(2 * math.pi * 440 * t)
+    # int16_array = np.int16(tone * 32767)
+    # pcm_bytes = int16_array.tobytes()
+    # audio_stream.write(pcm_bytes)
+    # return
+
+    try:
+        if not mic_active:
+            return
+
+        audio_bytes = data["audio"]
+        float32_array = np.frombuffer(audio_bytes, dtype=np.float32)
+        print("mic_chunk min/max:", float32_array.min(), float32_array.max())
+
+        pcm_bytes = float32_to_int16(audio_bytes)
+
+        audio_stream.write(pcm_bytes)  # direct write, no queue
+
+    except Exception:
+        logging.error("ERROR in mic_chunk handler", exc_info=True)
+    return
+
+
+    # try:
+    #     global mic_active
+
+    #     if not mic_active:
+    #         logging.warning("Received mic_chunk while mic inactive, ignoring")
+    #         return
+
+    #     audio_bytes = data["audio"]  # float32 PCM from browser
+
+    #     # Convert float32 → int16
+    #     pcm_bytes = float32_to_int16(audio_bytes)
+
+    #     # Queue for playback + beak animation
+    #     pcm_queue.put(pcm_bytes)
+
+    #     logging.info(f"mic_chunk: queued {len(pcm_bytes)} bytes")
+
+    # except Exception as e:
+    #     logging.error("ERROR in mic_chunk handler", exc_info=True)
+
+
 # ---------------------------------------------------------
 # Servo Initialization
 # ---------------------------------------------------------
@@ -202,17 +250,18 @@ def create_servo(name, pin):
     logging.info(f"Initializing servo '{name}' on GPIO pin {pin}")
     return Servo(pin)
 
+
 servos = {
     name: create_servo(name, pin)
     for name, pin in SERVO_PINS.items()
 }
-audio = Audio()  # Initialize audio system (real or simulated)
+
+audio = Audio()
 
 
 # ---------------------------------------------------------
 # Routes
 # ---------------------------------------------------------
-
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -220,69 +269,40 @@ def index():
 
 @app.route("/ping")
 def ping():
-    """
-    Heartbeat check
-    ---
-    responses:
-      200:
-        description: OK
-    """
     logging.info("Received ping request")
     return jsonify({"status": "ok"})
 
-# -----------------------------
-# Say phrase
-# -----------------------------
+
 @app.route("/say", methods=["POST"])
 def servo_say():
     data = request.get_json(silent=True) or {}
     phrase = data.get("phrase")
-    duration = audio.get_wav_duration(audio._resolve_path("piano2.wav"))
-    logging.info(f"Received SAY request for phrase: [%s], duration [%s]", phrase, duration)
 
-    audioThread = audio.play("piano2.wav")  # Start audio in separate thread
+    duration = audio.get_wav_duration(audio._resolve_path("piano2.wav"))
+    logging.info(f"Received SAY request for phrase: [{phrase}], duration [{duration}]")
+
+    audioThread = audio.play("piano2.wav")
     logging.info("Started audio thread, now controlling beak while audio plays")
-    logging.info(f"checking current_play_obj at start of loop: {audio.current_play_obj}")
-    # Wait until current_play_obj is set by the audio thread (with a timeout)
+
     for _ in range(20):
         if audio.current_play_obj:
-            logging.info(f"Audio thread ready: {audio.current_play_obj.is_playing()}")
             break
         time.sleep(0.01)
 
-    logging.info(f"current_play_obj after wait: {audio.current_play_obj}")
-
-
-
     while audio.current_play_obj and audio.current_play_obj.is_playing():
-        logging.info("Audio is still playing, opening beak")
         servos['beak'].open()
         time.sleep(0.1)
-        logging.info("Closing beak")
         servos['beak'].close()
         time.sleep(0.1)
-    logging.info("Audio finished, ensuring beak is closed")
+
     servos['beak'].close()
-    return jsonify({ "action": "say", "phrase": phrase})
+    return jsonify({"action": "say", "phrase": phrase})
 
 
-# -----------------------------
-# Basic open/close
-# -----------------------------
 @app.route("/servo/<name>/open", methods=["POST"])
 def servo_open(name):
     if name not in servos:
         return jsonify({"error": f"Unknown servo '{name}'"}), 404
-
-    # Read optional phrase from JSON body (may be empty or null)
-    #data = request.get_json(silent=True) or {}
-    #phrase = data.get("phrase")
-
-    #if phrase:
-    #    logging.info(f"Route: /servo/{name}/open -> phrase: {phrase}")
-   # else:
-    #    logging.info(f"Route: /servo/{name}/open -> no phrase provided")
-
     servos[name].open()
     return jsonify({"servo": name, "action": "open"})
 
@@ -291,28 +311,18 @@ def servo_open(name):
 def servo_close(name):
     if name not in servos:
         return jsonify({"error": f"Unknown servo '{name}'"}), 404
-
-    logging.info(f"Route: /servo/{name}/close")
     servos[name].close()
     return jsonify({"servo": name, "action": "close"})
 
 
-# -----------------------------
-# New: mid/neutral
-# -----------------------------
 @app.route("/servo/<name>/mid", methods=["POST"])
 def servo_mid(name):
     if name not in servos:
         return jsonify({"error": f"Unknown servo '{name}'"}), 404
-
-    logging.info(f"Route: /servo/{name}/mid")
     servos[name].mid()
     return jsonify({"servo": name, "action": "mid"})
 
 
-# -----------------------------
-# New: set(value)
-# -----------------------------
 @app.route("/servo/<name>/set", methods=["POST"])
 def servo_set(name):
     if name not in servos:
@@ -321,31 +331,22 @@ def servo_set(name):
     data = request.get_json(silent=True) or {}
     value = data.get("value")
 
-    if value is None:
-        return jsonify({"error": "Missing 'value' in JSON body"}), 400
-
     try:
         value = float(value)
-    except ValueError:
+    except:
         return jsonify({"error": "'value' must be a float"}), 400
 
     if not -1.0 <= value <= 1.0:
         return jsonify({"error": "'value' must be between -1.0 and 1.0"}), 400
 
-    logging.info(f"Route: /servo/{name}/set -> {value}")
     servos[name].set(value)
     return jsonify({"servo": name, "action": "set", "value": value})
 
 
-# -----------------------------
-# New: relax()
-# -----------------------------
 @app.route("/servo/<name>/relax", methods=["POST"])
 def servo_relax(name):
     if name not in servos:
         return jsonify({"error": f"Unknown servo '{name}'"}), 404
-
-    logging.info(f"Route: /servo/{name}/relax")
     servos[name].relax()
     return jsonify({"servo": name, "action": "relax"})
 
@@ -355,11 +356,10 @@ def servo_relax(name):
 # ---------------------------------------------------------
 def start():
     logging.info("Starting Flask server...")
-    #app.run(host="0.0.0.0", port=5000, threaded=True)
-    print("async_mode =", socketio.async_mode)
-    socketio.run(app,host="0.0.0.0", port=5000)
+    logging.info("Bring up browser to https://parrotpi")
+    logging.info("We are runing Caddy which allows us https and port 443/80")
+    socketio.run(app, host="0.0.0.0", port=5000)
 
 
 if __name__ == "__main__":
-    logging.info("Running server.py directly")
     start()

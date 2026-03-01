@@ -1,240 +1,143 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ParrotPi 🦜</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ParrotPi Control</title>
 
-    body {
-      background: #1a1a2e;
-      color: #eee;
-      font-family: 'Segoe UI', sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      gap: 32px;
-    }
-
-    h1 { font-size: 2rem; letter-spacing: 2px; color: #f4c542; }
-
-    /* ── Talk button ── */
-    #talkBtn {
-      width: 160px;
-      height: 160px;
-      border-radius: 50%;
-      border: none;
-      background: radial-gradient(circle at 40% 35%, #4caf50, #1b5e20);
-      color: white;
-      font-size: 1.1rem;
-      font-weight: bold;
-      letter-spacing: 1px;
-      cursor: pointer;
-      box-shadow: 0 0 0 6px #2e7d3280, 0 8px 32px #0007;
-      transition: transform 0.1s, box-shadow 0.1s, background 0.15s;
-      user-select: none;
-      -webkit-user-select: none;
-      touch-action: none; /* needed for mobile pointer events */
-    }
-
-    #talkBtn:active,
-    #talkBtn.active {
-      background: radial-gradient(circle at 40% 35%, #ef5350, #b71c1c);
-      box-shadow: 0 0 0 12px #ef535055, 0 8px 32px #0009;
-      transform: scale(0.96);
-    }
-
-    #talkBtn:disabled {
-      background: radial-gradient(circle at 40% 35%, #555, #333);
-      cursor: not-allowed;
-    }
-
-    /* ── Status ── */
-    #status {
-      font-size: 0.95rem;
-      color: #aaa;
-      height: 1.4em;
-      letter-spacing: 0.5px;
-    }
-
-    #status.on  { color: #ef5350; }
-    #status.ok  { color: #66bb6a; }
-    #status.err { color: #ff7043; }
-
-    /* ── VU meter ── */
-    .meter-wrap {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 6px;
-      opacity: 0;
-      transition: opacity 0.3s;
-    }
-    .meter-wrap.visible { opacity: 1; }
-
-    #vuMeter {
-      width: 220px;
-      height: 12px;
-      background: #333;
-      border-radius: 6px;
-      overflow: hidden;
-    }
-    #vuBar {
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #66bb6a, #f4c542, #ef5350);
-      border-radius: 6px;
-      transition: width 0.08s ease-out;
-    }
-    .meter-label { font-size: 0.75rem; color: #777; }
-
-    /* ── Control buttons ── */
-    .controls {
-      display: flex;
-      gap: 16px;
-    }
-    .ctrl-btn {
-      padding: 10px 24px;
-      border: 2px solid #f4c54280;
-      background: transparent;
-      color: #f4c542;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .ctrl-btn:hover { background: #f4c54218; }
-  </style>
+<style>
+  body { font-family: sans-serif; background: #eef; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+  #holdButton { 
+    width: 150px; height: 50px; font-size: 16px; border: none; border-radius: 8px; 
+    background: linear-gradient(90deg, #ffcc00, #ff9900); color: white; cursor: pointer; 
+    transition: transform 0.1s, background 0.1s;
+  }
+  #holdButton.active { transform: scale(1.1); }
+  #parrot { 
+    width: 200px; height: 200px; margin-top: 30px; 
+    background: url('/static/parrot.png') no-repeat center/contain; 
+    position: relative;
+  }
+  #beak { 
+    width: 40px; height: 20px; background: red; position: absolute; top: 100px; left: 80px; 
+    border-radius: 4px; transform-origin: top center; 
+    transition: transform 0.05s;
+  }
+</style>
 </head>
 <body>
 
-  <h1>🦜 ParrotPi</h1>
+<h1>ParrotPi Animatronic</h1>
+<button id="holdButton">Hold to Talk</button>
 
-  <button id="talkBtn">HOLD TO<br>TALK</button>
+<div id="parrot">
+  <div id="beak"></div>
+</div>
 
-  <div id="status">Connecting…</div>
-
-  <div class="meter-wrap" id="meterWrap">
-    <div id="vuMeter"><div id="vuBar"></div></div>
-    <span class="meter-label">mic level</span>
-  </div>
-
-  <div class="controls">
-    <button class="ctrl-btn" onclick="moveHead('left')">◀ Left</button>
-    <button class="ctrl-btn" onclick="moveHead('right')">Right ▶</button>
-    <button class="ctrl-btn" onclick="playClip('cracker')">🦜 Cracker!</button>
-    <button class="ctrl-btn" onclick="playClip('hi')">👋 Hi!</button>
-  </div>
+<!-- Socket.IO -->
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"
+        integrity="sha384-mZLF4UVrpi/QTWPA7BjNPEnkIfRFn4ZEO3Qt/HFklTJBj/gBOV8G3HcKn4NfQblz"
+        crossorigin="anonymous"></script>
 
 <script>
-// ── Socket connection ─────────────────────────────────────────────────────────
-const socket = io();   // connects back to the Flask server that served this page
+const socket = io();
 
-const talkBtn   = document.getElementById('talkBtn');
-const statusEl  = document.getElementById('status');
-const vuBar     = document.getElementById('vuBar');
-const meterWrap = document.getElementById('meterWrap');
+// --------------------
+// Audio Setup
+// --------------------
+let audioContext = new (window.AudioContext || window.webkitAudioContext)();
+let pcmNode;
 
-socket.on('connect',    () => setStatus('Connected ✓', 'ok'));
-socket.on('disconnect', () => setStatus('Disconnected', 'err'));
+// Load PCM Worklet
+audioContext.audioWorklet.addModule("{{ url_for('static', filename='pcm-worklet.js') }}")
+.then(() => {
+    pcmNode = new AudioWorkletNode(audioContext, "pcm-processor");
+    pcmNode.connect(audioContext.destination);
 
-function setStatus(msg, cls = '') {
-  statusEl.textContent = msg;
-  statusEl.className = cls;
+    socket.on("server_pcm", data => {
+        if (pcmNode) {
+            pcmNode.port.postMessage(new Float32Array(data));
+        }
+    });
+})
+.catch(err => console.error("Failed to load PCM Worklet:", err));
+
+let micStream;
+let micProcessor;
+let holdButton = document.getElementById("holdButton");
+let beak = document.getElementById("beak");
+
+// --------------------
+// RMS Utility
+// --------------------
+function computeRMS(buffer) {
+    let sum = 0;
+    for (let i = 0; i < buffer.length; i++) sum += buffer[i] * buffer[i];
+    return Math.sqrt(sum / buffer.length);
 }
 
-// ── Audio state ───────────────────────────────────────────────────────────────
-let audioCtx      = null;
-let mediaStream   = null;
-let scriptProc    = null;   // ScriptProcessorNode (broadly supported)
-let isTalking     = false;
-
-const SAMPLE_RATE  = 16000;   // must match server
-const BUFFER_SIZE  = 1024;    // ScriptProcessor buffer; ~64ms at 16 kHz
-
-// ── Mic start ─────────────────────────────────────────────────────────────────
+// --------------------
+// Mic Capture & Streaming
+// --------------------
 async function startMic() {
-  if (isTalking) return;
-  isTalking = true;
-  talkBtn.classList.add('active');
-  meterWrap.classList.add('visible');
+  await audioContext.resume();
 
-  try {
-    // Request mic access
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    if (!micStream) {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const source = audioContext.createMediaStreamSource(micStream);
+        micProcessor = audioContext.createScriptProcessor(1024, 1, 1);
 
-    // Build audio graph: mic → resample to 16 kHz → ScriptProcessor → chunks
-    audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
-    const source = audioCtx.createMediaStreamSource(mediaStream);
+        source.connect(micProcessor);
+        micProcessor.connect(audioContext.destination);
 
-    scriptProc = audioCtx.createScriptProcessor(BUFFER_SIZE, 1, 1);
-    source.connect(scriptProc);
-    scriptProc.connect(audioCtx.destination); // must be connected to run
+        micProcessor.onaudioprocess = (e) => {
+          console.log("onaudioprocess fired");
 
-    socket.emit('mic_start');
-    setStatus('🔴 Talking…', 'on');
+            const input = e.inputBuffer.getChannelData(0);
+                      console.log(input.slice(0, 10));
 
-    scriptProc.onaudioprocess = (e) => {
-      if (!isTalking) return;
+          console.log("audio firing", input[0]);
 
-      const samples = e.inputBuffer.getChannelData(0); // Float32Array
-      socket.emit('mic_chunk', { audio: Array.from(samples) });
+            socket.emit("mic_chunk", { audio: input.buffer });
 
-      // VU meter: RMS level
-      let sum = 0;
-      for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
-      const rms = Math.sqrt(sum / samples.length);
-      vuBar.style.width = Math.min(rms * 400, 100) + '%';
-    };
+            const amp = computeRMS(input);
+            beak.style.transform = `scaleY(${0.5 + amp * 5})`;
 
-  } catch (err) {
-    isTalking = false;
-    talkBtn.classList.remove('active');
-    meterWrap.classList.remove('visible');
-    setStatus('Mic error: ' + err.message, 'err');
-    console.error(err);
-  }
+            const colorIntensity = Math.min(255, Math.floor(amp * 500));
+            holdButton.style.background = `rgb(255, ${255 - colorIntensity}, 0)`;
+        };
+    }
+    socket.emit("mic_start");
 }
 
-// ── Mic stop ──────────────────────────────────────────────────────────────────
 function stopMic() {
-  if (!isTalking) return;
-  isTalking = false;
-  talkBtn.classList.remove('active');
-  meterWrap.classList.remove('visible');
-  vuBar.style.width = '0%';
+    socket.emit("mic_stop");
+    if (micProcessor) micProcessor.disconnect();
+    if (micStream) {
+        micStream.getTracks().forEach(track => track.stop());
+        micStream = null;
+    }
 
-  // Tear down audio graph
-  if (scriptProc) { scriptProc.disconnect(); scriptProc = null; }
-  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
-  if (audioCtx)   { audioCtx.close(); audioCtx = null; }
-
-  socket.emit('mic_stop');
-  setStatus('Connected ✓', 'ok');
+    beak.style.transform = `scaleY(0.5)`;
+    holdButton.style.background = `linear-gradient(90deg, #ffcc00, #ff9900)`;
 }
 
-// ── Button events (mouse + touch for mobile) ──────────────────────────────────
-talkBtn.addEventListener('pointerdown',  (e) => { e.preventDefault(); startMic(); });
-talkBtn.addEventListener('pointerup',   (e) => { e.preventDefault(); stopMic();  });
-talkBtn.addEventListener('pointerleave',(e) => { if (isTalking) stopMic(); });
-
-// Safety net: if user tabs away while holding
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden && isTalking) stopMic();
+// --------------------
+// Button Events
+// --------------------
+holdButton.addEventListener("mousedown", () => {
+    holdButton.classList.add("active");
+    startMic();
 });
-
-// ── Other controls ────────────────────────────────────────────────────────────
-function moveHead(direction) {
-  fetch(`/move/${direction}`).catch(console.error);
-}
-
-function playClip(name) {
-  fetch(`/play/${name}`).catch(console.error);
-}
+holdButton.addEventListener("mouseup", () => {
+    holdButton.classList.remove("active");
+    stopMic();
+});
+holdButton.addEventListener("mouseleave", () => {
+    holdButton.classList.remove("active");
+    stopMic();
+});
 </script>
+
 </body>
 </html>

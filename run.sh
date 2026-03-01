@@ -4,4 +4,5 @@
 source venv/bin/activate
 
 # Start the server
+clear
 python3 -m app.server
