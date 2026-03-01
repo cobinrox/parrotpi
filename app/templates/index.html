@@ -3,35 +3,109 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ParrotPi Control</title>
+<title>ParrotPi 🦜</title>
 
 <style>
-  body { font-family: sans-serif; background: #eef; display: flex; flex-direction: column; align-items: center; padding: 20px; }
-  #holdButton { 
-    width: 150px; height: 50px; font-size: 16px; border: none; border-radius: 8px; 
-    background: linear-gradient(90deg, #ffcc00, #ff9900); color: white; cursor: pointer; 
-    transition: transform 0.1s, background 0.1s;
+  /* Reset and body */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { 
+    font-family: sans-serif; 
+    background: #1a1a2e; 
+    color: #eee; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    justify-content: flex-start;
+    min-height: 100vh; 
+    padding: 20px; 
+    gap: 20px;
   }
-  #holdButton.active { transform: scale(1.1); }
-  #parrot { 
-    width: 200px; height: 200px; margin-top: 30px; 
-    background: url('/static/parrot.png') no-repeat center/contain; 
+
+  h1 { font-size: 2rem; letter-spacing: 2px; color: #f4c542; text-align:center; }
+
+  /* ── Parrot graphic ── */
+  #parrot {
+    width: 200px;
+    height: 200px;
+    background: url('/static/parrot.png') no-repeat center/contain;
     position: relative;
   }
-  #beak { 
-    width: 40px; height: 20px; background: red; position: absolute; top: 100px; left: 80px; 
-    border-radius: 4px; transform-origin: top center; 
+  #beak {
+    width: 40px; height: 20px; 
+    background: red; 
+    position: absolute; 
+    top: 100px; left: 80px; 
+    border-radius: 4px; 
+    transform-origin: top center; 
     transition: transform 0.05s;
   }
+
+  /* ── Talk button ── */
+  #holdButton {
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    border: none;
+    background: radial-gradient(circle at 40% 35%, #4caf50, #1b5e20);
+    color: white;
+    font-size: 1.1rem;
+    font-weight: bold;
+    text-align: center;
+    cursor: pointer;
+    box-shadow: 0 0 0 6px #2e7d3280, 0 8px 32px #0007;
+    transition: transform 0.1s, box-shadow 0.1s, background 0.15s;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  #holdButton.active {
+    background: radial-gradient(circle at 40% 35%, #ef5350, #b71c1c);
+    box-shadow: 0 0 0 12px #ef535055, 0 8px 32px #0009;
+    transform: scale(0.96);
+  }
+
+  /* ── VU meter ── */
+  .meter-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .meter-wrap.visible { opacity: 1; }
+
+  #vuMeter {
+    width: 220px;
+    height: 12px;
+    background: #333;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  #vuBar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #66bb6a, #f4c542, #ef5350);
+    border-radius: 6px;
+    transition: width 0.08s ease-out;
+  }
+  .meter-label { font-size: 0.75rem; color: #777; }
+
 </style>
 </head>
 <body>
 
-<h1>ParrotPi Animatronic</h1>
-<button id="holdButton">Hold to Talk</button>
+<h1>🦜 ParrotPi</h1>
 
 <div id="parrot">
   <div id="beak"></div>
+</div>
+
+<button id="holdButton">HOLD TO<br>TALK</button>
+
+<div class="meter-wrap" id="meterWrap">
+  <div id="vuMeter"><div id="vuBar"></div></div>
+  <span class="meter-label">mic level</span>
 </div>
 
 <!-- Socket.IO -->
@@ -43,21 +117,18 @@
 const socket = io();
 
 // --------------------
-// Audio Setup
+// Audio Setup & PCM Worklet (unchanged from working HTML)
 // --------------------
 let audioContext = new (window.AudioContext || window.webkitAudioContext)();
 let pcmNode;
 
-// Load PCM Worklet
 audioContext.audioWorklet.addModule("{{ url_for('static', filename='pcm-worklet.js') }}")
 .then(() => {
     pcmNode = new AudioWorkletNode(audioContext, "pcm-processor");
     pcmNode.connect(audioContext.destination);
 
     socket.on("server_pcm", data => {
-        if (pcmNode) {
-            pcmNode.port.postMessage(new Float32Array(data));
-        }
+        if (pcmNode) pcmNode.port.postMessage(new Float32Array(data));
     });
 })
 .catch(err => console.error("Failed to load PCM Worklet:", err));
@@ -66,78 +137,54 @@ let micStream;
 let micProcessor;
 let holdButton = document.getElementById("holdButton");
 let beak = document.getElementById("beak");
+let meterWrap = document.getElementById("meterWrap");
 
-// --------------------
 // RMS Utility
-// --------------------
 function computeRMS(buffer) {
     let sum = 0;
     for (let i = 0; i < buffer.length; i++) sum += buffer[i] * buffer[i];
     return Math.sqrt(sum / buffer.length);
 }
 
-// --------------------
 // Mic Capture & Streaming
-// --------------------
 async function startMic() {
   await audioContext.resume();
+  if (!micStream) {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const source = audioContext.createMediaStreamSource(micStream);
+    micProcessor = audioContext.createScriptProcessor(1024, 1, 1);
+    source.connect(micProcessor);
+    micProcessor.connect(audioContext.destination);
 
-    if (!micStream) {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const source = audioContext.createMediaStreamSource(micStream);
-        micProcessor = audioContext.createScriptProcessor(1024, 1, 1);
+    micProcessor.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0);
+        socket.emit("mic_chunk", { audio: input.slice() });
+        const amp = computeRMS(input);
+        beak.style.transform = `scaleY(${0.5 + amp * 5})`;
 
-        source.connect(micProcessor);
-        micProcessor.connect(audioContext.destination);
-
-        micProcessor.onaudioprocess = (e) => {
-          console.log("onaudioprocess fired");
-
-            const input = e.inputBuffer.getChannelData(0);
-                      console.log(input.slice(0, 10));
-
-          console.log("audio firing", input[0]);
-
-            //socket.emit("mic_chunk", { audio: input.buffer });
-            socket.emit("mic_chunk", { audio: input.slice() });
-            const amp = computeRMS(input);
-            beak.style.transform = `scaleY(${0.5 + amp * 5})`;
-
-            const colorIntensity = Math.min(255, Math.floor(amp * 500));
-            holdButton.style.background = `rgb(255, ${255 - colorIntensity}, 0)`;
-        };
-    }
-    socket.emit("mic_start");
+        meterWrap.classList.add("visible");
+        const colorIntensity = Math.min(255, Math.floor(amp * 500));
+        holdButton.style.background = `rgb(255, ${255 - colorIntensity}, 0)`;
+        document.getElementById("vuBar").style.width = Math.min(amp*400,100)+'%';
+    };
+  }
+  socket.emit("mic_start");
 }
 
 function stopMic() {
     socket.emit("mic_stop");
     if (micProcessor) micProcessor.disconnect();
-    if (micStream) {
-        micStream.getTracks().forEach(track => track.stop());
-        micStream = null;
-    }
-
+    if (micStream) { micStream.getTracks().forEach(track => track.stop()); micStream = null; }
     beak.style.transform = `scaleY(0.5)`;
-    holdButton.style.background = `linear-gradient(90deg, #ffcc00, #ff9900)`;
+    holdButton.style.background = `radial-gradient(circle at 40% 35%, #4caf50, #1b5e20)`;
+    meterWrap.classList.remove("visible");
 }
 
-// --------------------
 // Button Events
-// --------------------
-holdButton.addEventListener("mousedown", () => {
-    holdButton.classList.add("active");
-    startMic();
-});
-holdButton.addEventListener("mouseup", () => {
-    holdButton.classList.remove("active");
-    stopMic();
-});
-holdButton.addEventListener("mouseleave", () => {
-    holdButton.classList.remove("active");
-    stopMic();
-});
-</script>
+holdButton.addEventListener("mousedown", () => { holdButton.classList.add("active"); startMic(); });
+holdButton.addEventListener("mouseup",   () => { holdButton.classList.remove("active"); stopMic(); });
+holdButton.addEventListener("mouseleave",() => { holdButton.classList.remove("active"); stopMic(); });
 
+</script>
 </body>
 </html>
