@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ParrotPi Control v0.2</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            text-align: center;
+            margin-top: 40px;
+        }
+        .row {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px auto;
+            width: 300px;
+        }
+        button, select {
+            padding: 12px 20px;
+            font-size: 18px;
+            cursor: pointer;
+        }
+        .section {
+            margin-top: 40px;
+        }
+        .diag-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        #responseBox {
+            margin-top: 40px;
+            padding: 15px;
+            border: 1px solid #aaa;
+            width: 80%;
+            margin-left: auto;
+            margin-right: auto;
+            text-align: left;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+#talkButton {
+    padding: 14px 24px;
+    font-size: 20px;
+    border-radius: 12px;
+    border: 2px solid #444;
+    transition: all 0.2s ease;
+    position: relative;
+    z-index: 1;
+}
+
+/* Active transmit mode */
+#talkButton.talking {
+    background-color: #d40000;
+    color: white;
+    border-color: #ff8080;
+    box-shadow:
+        0 0 10px rgba(255, 0, 0, 0.7),
+        0 0 20px rgba(255, 0, 0, 0.5),
+        0 0 30px rgba(255, 0, 0, 0.3);
+    animation: pulseGlow 1.2s infinite ease-in-out;
+}
+
+/* Pulsing halo animation */
+@keyframes pulseGlow {
+    0% {
+        box-shadow:
+            0 0 8px rgba(255, 0, 0, 0.5),
+            0 0 16px rgba(255, 0, 0, 0.3),
+            0 0 24px rgba(255, 0, 0, 0.2);
+    }
+    50% {
+        box-shadow:
+            0 0 16px rgba(255, 0, 0, 0.9),
+            0 0 28px rgba(255, 0, 0, 0.7),
+            0 0 40px rgba(255, 0, 0, 0.5);
+    }
+    100% {
+        box-shadow:
+            0 0 8px rgba(255, 0, 0, 0.5),
+            0 0 16px rgba(255, 0, 0, 0.3),
+            0 0 24px rgba(255, 0, 0, 0.2);
+    }
+}    
+    </style>
+</head>
+<body>
+
+    <!-- PING -->
+    <button onclick="ping()">PING</button>
+
+    <!-- DIAGNOSTICS -->
+    <div class="section">
+        <h3>Diagnostics</h3>
+        <div class="diag-row">
+            <button onclick="openBeak()">Open Beak</button>
+            <button onclick="closeBeak()">Close Beak</button>
+            <button onclick="headLeft()">Head Left</button>
+            <button onclick="headRight()">Head Right</button>
+            <button id="talkButton"
+    onmousedown="startTalking()"
+    onmouseup="stopTalking()"
+    onmouseleave="stopTalking()"
+    ontouchstart="startTalking()"
+    ontouchend="stopTalking()">
+    Push to Talk
+</button>
+        </div>
+    </div>
+
+    <!-- MAIN CONTROL ROW -->
+    <div class="row section">
+        <button onclick="headLeft()">&lt;&lt;</button>
+
+        <select id="phraseSelect" onchange="saySelected()">
+            <option value="">SAY...</option>
+            <option value="Hello">Hello</option>
+            <option value="Goodbye">Goodbye</option>
+            <option value="DoesHeTalk">Does he talk?</option>
+            <option value="Laugh">Laugh</option>
+        </select>
+
+        <button onclick="headRight()">&gt;&gt;</button>
+    </div>
+
+    <!-- QUICK PHRASES -->
+    <div class="section">
+        <button onclick="say('Laugh')">LAUGH</button>
+        <button onclick="say('Hello')">HI</button>
+    </div>
+
+    <!-- LIVE TALK -->
+    <div class="section">
+        <button id="talkButton"
+    onmousedown="startTalking()"
+    onmouseup="stopTalking()"
+    onmouseleave="stopTalking()"
+    ontouchstart="startTalking()"
+    ontouchend="stopTalking()">
+    Push to Talk
+</button>
+    </div>
+
+    <!-- RESPONSE BOX -->
+    <div id="responseBox">RESPONSE: (waiting for command)</div>
+
+ <!--script src="/socket.io/socket.io.js"></script-->
+ <!-- W A R N I N G    C D N   -->
+<script src="https://cdn.socket.io/3.1.3/socket.io.min.js"></script> 
+<script>
+    const socket = io();   // Connect to Flask-SocketIO backend
+
+    let mediaRecorder = null;
+    let isTalking = false;
+
+    function showResponse(label, data) {
+        const box = document.getElementById('responseBox');
+        let formatted = "";
+
+        if (typeof data === "object") {
+            formatted = JSON.stringify(data, null, 2);
+        } else {
+            formatted = data;
+        }
+
+        box.textContent = `RESPONSE (${label}):\n${formatted}`;
+    }
+
+    // --- BASIC PING ---
+    function ping() {
+        console.log("Sending ping request...");
+        fetch('/ping')
+            .then(r => r.json())
+            .then(data => showResponse("PING", data))
+            .catch(err => showResponse("PING ERROR", err));
+    }
+
+    // --- OPEN BEAK ---
+    function openBeak() {
+        console.log("Sending open beak command...");
+        fetch('/servo/beak/open', { method: "POST" })
+            .then(r => r.json())
+            .then(data => showResponse("OPEN BEAK", data))
+            .catch(err => showResponse("OPEN BEAK ERROR", err));
+    }
+    // --- CLOSE BEAK ---
+    function closeBeak() {
+        console
+        fetch('/servo/beak/close', { method: "POST" })
+            .then(r => r.json())
+            .then(data => showResponse("CLOSE BEAK", data))
+            .catch(err => showResponse("CLOSE BEAK ERROR", err));
+    }
+    // --- HEAD LEFT
+    function headLeft() {
+        console.log("Sending head left command...");
+        fetch('/servo/head/left', { method: "POST" })
+            .then(r => r.json())
+            .then(data => showResponse("HEAD LEFT", data))
+            .catch(err => showResponse("HEAD LEFT ERROR", err));
+    }
+    // HEAD RIGHT
+    function headRight() {
+        console.log
+        fetch('/servo/head/right', { method: "POST" })
+            .then(r => r.json())
+            .then(data => showResponse("HEAD RIGHT", data))
+            .catch(err => showResponse("HEAD RIGHT ERROR", err));
+    }
+
+    function saySelected() {    
+        const phrase = document.getElementById('phraseSelect').value;
+        if (phrase) say(phrase);
+    }
+
+    // SAY A PHRASE
+    function say(phrase) {
+        console.log(`Sending SAY command with phrase: ${phrase}`);
+        fetch('/say', {
+            method: "POST",
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phrase })
+        })
+        .then(r => r.json())
+        .then(data => showResponse(`SAY (${phrase})`, data))
+        .catch(err => showResponse("SAY ERROR", err));
+    }
+
+    // // --- MOVEMENT BUTTONS ---
+    // function left() {
+    //     fetch('/servo/head/left', { method: "POST" })
+    //         .then(r => r.json())
+    //         .then(data => showResponse("LEFT BUTTON", data))
+    //         .catch(err => showResponse("LEFT ERROR", err));
+    // }
+
+    // function right() {
+    //     fetch('/servo/head/right', { method: "POST" })
+    //         .then(r => r.json())
+    //         .then(data => showResponse("RIGHT BUTTON", data))
+    //         .catch(err => showResponse("RIGHT ERROR", err));
+    // }
+
+ 
+    // --- TALK BUTTON ---
+    //   Every 100ms, the MediaRecorder produces a small WebM/Opus audio chunk.
+    //Each chunk is sent over the WebSocket connection using the event name mic_chunk. 
+    // 
+async function startTalking() {
+    if (isTalking) return;
+
+    try {
+        socket.emit("mic_start");
+        // wait a bit for the server to be ready before sending audio
+        await new Promise(r => setTimeout(r, 200));
+
+
+        // Request microphone access
+        console.log("Requesting microphone access...");
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log("... got mic access");
+
+        // Create recorder for WebM audio chunks
+        //mediaRecorder = new MediaRecorder(stream, {     mimeType: "audio/ogg;codecs=opus" });
+
+let mimeType = null;
+
+if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+    mimeType = "audio/webm;codecs=opus";
+} else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {
+    mimeType = "audio/ogg;codecs=opus";
+} else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+    mimeType = "audio/mp4";   // Safari fallback
+} else {
+    throw new Error("No supported audio format");
+}
+
+console.log("Using mimeType:", mimeType);
+
+mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+        console.log("MediaRecorder created:", mediaRecorder);
+
+        // Send each chunk to the server
+        console.log("Setting up dataavailable handler...");
+        mediaRecorder.ondataavailable = async (event) => {
+            console.log("Audio chunk available:", event.data);
+            //const buffer = await event.data.arrayBuffer();
+            //const bytes = new Uint8Array(buffer);
+
+            socket.emit("mic_chunk", { audio: buffer });            
+            if (event.data.size > 0) {
+                const buffer = await event.data.arrayBuffer();
+                console.log(`Emitting mic_chunk with ${buffer.byteLength} bytes`);
+                socket.emit("mic_chunk", { audio: buffer });
+            }
+        };
+
+        // Start recording, emit chunks every 100ms
+        console.log("Starting media recording...");
+        mediaRecorder.start(100);
+
+        // Mark as active
+        isTalking = true;
+
+        // Visual + text feedback
+        const btn = document.getElementById("talkButton");
+        btn.classList.add("talking");
+        btn.textContent = "Talking…";
+
+        showResponse("WALKIE TALKIE", "Talking (hold to talk)");
+
+    } catch (err) {
+        showResponse("WALKIE TALKIE ERROR", err.toString());
+    }
+}
+
+function stopTalking() {
+    if (!isTalking) return;
+
+    // Stop recording
+    mediaRecorder.stop();
+    isTalking = false;
+
+    // Restore button visuals + text
+    const btn = document.getElementById("talkButton");
+    btn.classList.remove("talking");
+    btn.textContent = "Hold to Talk";
+
+    showResponse("WALKIE TALKIE", "Stopped talking");
+    socket.emit("mic_stop");
+}
+</script>
+</body>
+</html>
