@@ -1,4 +1,5 @@
 import os
+import subprocess
 import eventlet
 eventlet.monkey_patch()
 
@@ -237,6 +238,34 @@ def servo_relax(name):
         return jsonify({"error": f"Unknown servo '{name}'"}), 404
     servos[name].relax()
     return jsonify({"servo": name, "action": "relax"})
+def amixer(cmd):
+    subprocess.run(["amixer", "set", "Master", cmd], stdout=subprocess.PIPE)
+
+def get_volume():
+    # Example amixer output line:
+    #   Mono: Playback 74 [58%] [-16.50dB] [on]
+    out = subprocess.check_output(["amixer", "get", "Master"]).decode()
+    for line in out.splitlines():
+        if "%" in line:
+            # Extract the first [XX%]
+            start = line.find("[") + 1
+            end = line.find("%")
+            return int(line[start:end])
+    return 0
+@app.get("/volume")
+def volume_get():
+    return jsonify({"volume": get_volume()})    
+@app.post("/volUp")
+def volume_up():
+    amixer("5%+")
+    return jsonify({"volume": get_volume()})
+
+@app.post("/volDown")
+def volume_down():
+    amixer("5%-")
+    return jsonify({"volume": get_volume()})
+
+
 
 def start():
     logging.info("Starting Flask server...")
