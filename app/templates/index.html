@@ -30,15 +30,7 @@
     background: url('/static/parrot.png') no-repeat center/contain;
     position: relative;
   }
-  #beak {
-    width: 40px; height: 20px; 
-    background: red; 
-    position: absolute; 
-    top: 100px; left: 80px; 
-    border-radius: 4px; 
-    transform-origin: top center; 
-    transition: transform 0.05s;
-  }
+
 
   /* ── Talk button ── */
   #holdButton {
@@ -98,7 +90,6 @@
 <h1>🦜 ParrotPi</h1>
 
 <div id="parrot">
-  <div id="beak"></div>
 </div>
 
 <!--  VOLUME BUTTONS  -->
@@ -180,7 +171,6 @@ async function startMic() {
         const input = e.inputBuffer.getChannelData(0);
         socket.emit("mic_chunk", { audio: input.slice() });
         const amp = computeRMS(input);
-        beak.style.transform = `scaleY(${0.5 + amp * 5})`;
 
         meterWrap.classList.add("visible");
         const colorIntensity = Math.min(255, Math.floor(amp * 500));
@@ -195,7 +185,6 @@ function stopMic() {
     socket.emit("mic_stop");
     if (micProcessor) micProcessor.disconnect();
     if (micStream) { micStream.getTracks().forEach(track => track.stop()); micStream = null; }
-    beak.style.transform = `scaleY(0.5)`;
     holdButton.style.background = `radial-gradient(circle at 40% 35%, #4caf50, #1b5e20)`;
     meterWrap.classList.remove("visible");
 }
