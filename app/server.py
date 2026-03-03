@@ -1,5 +1,7 @@
 import os
 import subprocess
+from pathlib import Path
+
 import eventlet
 eventlet.monkey_patch()
 
@@ -15,7 +17,7 @@ from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 from flasgger import Swagger
 from flask_socketio import SocketIO, emit
-
+from flask import current_app
 from .controller import Servo
 from .controller import Audio
 from .config import SERVO_PINS
@@ -174,8 +176,16 @@ def servo_say():
 
     duration = audio.get_wav_duration(audio._resolve_path("piano2.wav"))
     logging.info(f"Received SAY request for phrase: [{phrase}], duration [{duration}]")
+    title = phrase.lower() + ".wav"
+    base_path = Path(current_app.root_path)
+    audio_path = base_path / "static" / "audio" / title
 
-    audioThread = audio.play("piano2.wav")
+    if audio_path.is_file():
+        audioThread = audio.play(str(audio_path))
+    else:
+        current_app.logger.error(f"Missing audio file: {audio_path}")
+        audioThread = audio.play("squawk3.wav")  # fallback to a default sound
+    #audioThread = audio.play(title)
     logging.info("Started audio thread, now controlling beak while audio plays")
 
     for _ in range(20):
@@ -184,16 +194,21 @@ def servo_say():
         time.sleep(0.01)
 
     while audio.current_play_obj and audio.current_play_obj.is_playing():
+    #while duration > 0:
         servos['beak'].open()
         time.sleep(0.1)
         servos['beak'].close()
         time.sleep(0.1)
+        duration -= 0.2
+        duration -= 0.2
+        duration -= 0.2 #account for motor movement too
 
     servos['beak'].close()
     return jsonify({"action": "say", "phrase": phrase})
 
 @app.route("/servo/<name>/open", methods=["POST"])
 def servo_open(name):
+    logging.info(f"Received request to open servo '{name}'")
     if name not in servos:
         return jsonify({"error": f"Unknown servo '{name}'"}), 404
     servos[name].open()
@@ -201,6 +216,7 @@ def servo_open(name):
 
 @app.route("/servo/<name>/close", methods=["POST"])
 def servo_close(name):
+    logging.info(f"Received request to close servo '{name}'")
     if name not in servos:
         return jsonify({"error": f"Unknown servo '{name}'"}), 404
     servos[name].close()
@@ -208,6 +224,7 @@ def servo_close(name):
 
 @app.route("/servo/<name>/mid", methods=["POST"])
 def servo_mid(name):
+    logging.info(f"Received request to mid servo '{name}'")
     if name not in servos:
         return jsonify({"error": f"Unknown servo '{name}'"}), 404
     servos[name].mid()
@@ -219,6 +236,7 @@ def servo_set(name):
         return jsonify({"error": f"Unknown servo '{name}'"}), 404
 
     data = request.get_json(silent=True) or {}
+    logging.info(f"Received request to set servo '{name}' with data: {data}")
     value = data.get("value")
 
     try:
