@@ -194,15 +194,23 @@ def servo_say():
         time.sleep(0.01)
 
     while audio.current_play_obj and audio.current_play_obj.is_playing():
-    #while duration > 0:
+        servos['beak'].open()
+        time.sleep(0.1)
+        servos['beak'].open()
+        time.sleep(0.1)
         servos['beak'].open()
         time.sleep(0.1)
         servos['beak'].close()
         time.sleep(0.1)
-        duration -= 0.2
-        duration -= 0.2
-        duration -= 0.2 #account for motor movement too
+        servos['beak'].close()
+        time.sleep(0.1)
+        servos['beak'].close()
+        time.sleep(0.1)
 
+    servos['beak'].close()
+    time.sleep(0.1)
+    servos['beak'].close()
+    time.sleep(0.1)
     servos['beak'].close()
     return jsonify({"action": "say", "phrase": phrase})
 
