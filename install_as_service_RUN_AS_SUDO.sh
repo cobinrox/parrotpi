@@ -29,6 +29,8 @@ echo "Installing ParrotPi as a system service..."
 echo "Project directory: $PROJECT_DIR"
 echo "Python interpreter: $PYTHON_BIN"
 echo "Log file: $LOG_FILE"
+echo "Env file: /etc/parrotpi.env"
+cp parrotpi.env /etc/parrotpi.env
 
 # ---- sanity checks ----
 if [ ! -f "$PYTHON_BIN" ]; then
@@ -63,6 +65,7 @@ WorkingDirectory=$PROJECT_DIR
 ExecStart=$PYTHON_BIN -m app.server
 Restart=always
 RestartSec=2
+EnvironmentFile=/etc/parrotpi.env
 
 # Logging
 StandardOutput=append:$LOG_FILE

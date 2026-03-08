@@ -32,6 +32,12 @@ print("DEFAULT DEVICE:", sd.default.device)
 # ---------------------------------------------------------
 mic_active = False
 playback_queue = queue.Queue(maxsize=200)
+bird=os.getenv("BIRD", "big") 
+print("Starting with bird=", bird)
+print("You can set bird to big or small in local parrotpi.env")
+print("or, for a service, in /etc/parrotpi.env")
+print("Or just override in the source right here if you want:")
+#bird=small
 
 # ---------------------------------------------------------
 # Audio Output Stream (callback-based)
@@ -171,6 +177,7 @@ def ping():
 
 @app.route("/say", methods=["POST"])
 def servo_say():
+    global bird
     data = request.get_json(silent=True) or {}
     phrase = data.get("phrase")
 
@@ -194,24 +201,34 @@ def servo_say():
         time.sleep(0.01)
 
     while audio.current_play_obj and audio.current_play_obj.is_playing():
-        servos['beak'].open()
-        time.sleep(0.1)
-        servos['beak'].open()
-        time.sleep(0.1)
-        servos['beak'].open()
-        time.sleep(0.1)
-        servos['beak'].close()
-        time.sleep(0.1)
-        servos['beak'].close()
-        time.sleep(0.1)
-        servos['beak'].close()
-        time.sleep(0.1)
+        if bird == 'big':
+           servos['beak'].open()
+           time.sleep(0.1)
+           servos['beak'].close()
+           time.sleep(0.1)
+           servos['beak'].open()
+           time.sleep(0.1)
+           servos['beak'].close()
+           time.sleep(0.1)
+           servos['beak'].open()
+           time.sleep(0.1)
+           servos['beak'].close()
+           time.sleep(0.1)
+        else:
+           servos['beak'].open()
+           time.sleep(0.1)
+           servos['beak'].close()
+           time.sleep(0.1)
 
-    servos['beak'].close()
-    time.sleep(0.1)
-    servos['beak'].close()
-    time.sleep(0.1)
-    servos['beak'].close()
+    if bird == 'big':
+       servos['beak'].close()
+       time.sleep(0.1)
+       servos['beak'].close()
+       time.sleep(0.1)
+       servos['beak'].close()
+    else:
+       servos['beak'].close()
+       time.sleep(0.1)
     return jsonify({"action": "say", "phrase": phrase})
 
 @app.route("/servo/<name>/open", methods=["POST"])

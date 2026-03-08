@@ -65,11 +65,11 @@ class RealServo:
             except Exception:
                 logging.exception("Failed to detach servo after action")
 
-    def close(self):
+    def open(self):
         logging.info("Servo -> CLOSE(max)")
         self._perform(self.servo.max)
 
-    def open(self):
+    def close(self):
         logging.info("Servo -> OPEN(min)")
         self._perform(self.servo.min)
 
