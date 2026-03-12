@@ -68,7 +68,8 @@ class RealAudio:
             # Use aplay with explicit device (matches startup tone)
             import subprocess
             result = subprocess.run([
-                "aplay", "-D", "plughw:0,0", path
+                "aplay", "-D", "plughw:0,0","-c","2", path
+               #"aplay", "-D", "dmix0", path  # dmix allows multiple apps
             ]) #, capture_output=True, timeout=duration + 1.0)
             
             if result.returncode == 0:

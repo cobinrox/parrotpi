@@ -45,7 +45,7 @@ print("or, for a service, in /etc/parrotpi.env")
 print("Or just override in the source right here if you want:")
 #bird=small
 mic_active = False
-playback_queue = queue.Queue(maxsize=200)
+#playback_queue = queue.Queue(maxsize=10)
 
 def audio_callback(outdata, frames, time, status):
     global playback_queue
@@ -122,8 +122,19 @@ else:
 # # Play the startup tone
 # play_test_tone()
 print("Playing start up tone")
-subprocess.run(["aplay", "-D", "plughw:0,0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
+#subprocess.run(["aplay", "-D", "plughw:0,0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
+#subprocess.run(["aplay", "-D", "dmix0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
+subprocess.run(["aplay", "-D", "plughw:0,0", "-c", "2", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
+print("Startup done - now start mic stream")
 
+# NOW start mic stream (AFTER aplay finishes)
+import queue
+import numpy as np
+import sounddevice as sd
+
+#playback_queue = queue.Queue(maxsize=10)
+mic_buffer = b""
+mic_active = False
 # ---------------------------------------------------------
 # Utility: Float32 → Int16
 # ---------------------------------------------------------
@@ -132,6 +143,15 @@ def float32_to_int16(float32_bytes):
     int16 = np.int16(arr * 32767)
     return int16.tobytes()
 
+def float32_to_int16_stereo(float32_bytes):
+    """Convert browser mic float32 mono → stereo int16 for MAX98357A"""
+    # 4096 float32 bytes = 1024 mono samples
+    float32_mono = np.frombuffer(float32_bytes, dtype=np.float32)
+    # Convert to int16 mono [-32768, 32767]
+    int16_mono = np.int16(float32_mono * 32767.0).astype(np.int16)
+    # Duplicate to stereo (L=R for mono mic)
+    stereo = np.column_stack([int16_mono, int16_mono])  # (1024, 2)
+    return stereo.tobytes()  # 4096 bytes (1024 frames * 2ch * 2bytes)
 # ---------------------------------------------------------
 # Flask + Socket.IO Setup
 # ---------------------------------------------------------
@@ -149,43 +169,36 @@ def handle_mic_start():
     logging.info("1. Received mic_start from client")
     mic_active = True
 
-
-@socketio.on('mic_stop')
-def handle_mic_stop():
-    global mic_active
-    logging.info("Received mic_stop from client")
-    mic_active = False
-
-    # Clear queue
-    while not playback_queue.empty():
-        try: playback_queue.get_nowait()
-        except queue.Empty: break
-
-
 @socketio.on('mic_chunk')
 def handle_mic_chunk(data):
-    global mic_active
+    global mic_active, mic_buffer
     if not mic_active:
         return
 
     try:
         audio_bytes = data["audio"]
-        print("len(audio_bytes) =", len(audio_bytes))
+        pcm_bytes = float32_to_int16_stereo(audio_bytes)
+        
+        # Buffer 3 chunks (~60ms), then play
+        mic_buffer += pcm_bytes
+        if len(mic_buffer) >= 3 * 4096:  # 3 chunks = ~60ms
+            # Pipe to aplay (non-blocking)
+            p = subprocess.Popen([
+                "aplay", "-D", "plughw:0,0", "-f", "S16_LE", "-r", "48000", "-c", "2"
+            ], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            p.stdin.write(mic_buffer)
+            p.stdin.close()
+            mic_buffer = b""  # Clear buffer
+    except:
+        pass
 
-        float32_array = np.frombuffer(audio_bytes, dtype=np.float32)
-        print("mic_chunk min/max:", float32_array.min(), float32_array.max())
-
-        pcm_bytes = float32_to_int16(audio_bytes)
-
-        try:
-            playback_queue.put_nowait(pcm_bytes)
-        except queue.Full:
-            # Drop if behind
-            pass
-
-    except Exception:
-        logging.error("ERROR in mic_chunk handler", exc_info=True)
-
+@socketio.on('mic_stop')
+def handle_mic_stop():
+    global mic_active, mic_buffer
+    mic_active = False
+    mic_buffer = b""  # Clear leftover
+#mic_stream.start()
+#print("Mic stream ready",flush=True)
 # ---------------------------------------------------------
 # Servo Initialization
 # ---------------------------------------------------------
@@ -197,7 +210,10 @@ def handle_mic_chunk(data):
 #     name: create_servo(name, pin)
 #     for name, pin in SERVO_PINS.items()
 # }
-
+#playback_queue = queue.Queue(maxsize=10)
+#mic_stream = sd.RawOutputStream(...)  # background, silent
+#mic_stream.start()
+#print("Mic stream ready")
 audio = Audio()
 
 # ---------------------------------------------------------
@@ -214,13 +230,21 @@ def ping():
 
 @app.route("/say", methods=["POST"])
 def servo_say():
+    #global mic_stream
+    #mic_stream.stop()
     global bird
     data = request.get_json(silent=True) or {}
     phrase = data.get("phrase")
 
     duration = audio.get_wav_duration(audio._resolve_path("piano2.wav"))
     logging.info(f"Received SAY request for phrase: [{phrase}], duration [{duration}]")
-    title = phrase.lower() + ".wav"
+    if phrase == "Does He Talk":
+        title = "doesthebirdtalk.wav"
+    else:
+        if phrase == "F#$@!!":
+           title = "curse.wav"
+        else:
+            title = phrase.lower() + ".wav"
     base_path = Path(current_app.root_path)
     audio_path = base_path / "static" / "audio" / title
 
@@ -266,6 +290,7 @@ def servo_say():
     else:
        #servos['beak'].close()
        time.sleep(0.1)
+    #mic_stream.start()
     return jsonify({"action": "say", "phrase": phrase})
 
 @app.route("/servo/<name>/open", methods=["POST"])
