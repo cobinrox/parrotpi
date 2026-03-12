@@ -51,17 +51,32 @@ class RealAudio:
         duration = self.get_wav_duration(path)
         print(f"Playing audio: {path} (duration: {duration:.2f}s)")
 
+        #try:
+            
+            # wave = sa.WaveObject.from_wave_file(path)
+            # play_obj = wave.play()
+            # #play_obj = wave.play(device=0)
+
+            # # store the playback object so other code can check status
+            # logging.info("Setting current_play_obj")
+            # self.current_play_obj = play_obj
+
+            # play_obj.wait_done()
+            # print("Audio finished")
+            # self.current_play_obj = None
         try:
-            wave = sa.WaveObject.from_wave_file(path)
-            play_obj = wave.play()
-
-            # store the playback object so other code can check status
-            logging.info("Setting current_play_obj")
-            self.current_play_obj = play_obj
-
-            play_obj.wait_done()
-            print("Audio finished")
-            self.current_play_obj = None
+            # Use aplay with explicit device (matches startup tone)
+            import subprocess
+            result = subprocess.run([
+                "aplay", "-D", "plughw:0,0", path
+            ]) #, capture_output=True, timeout=duration + 1.0)
+            
+            if result.returncode == 0:
+                print("Audio finished")
+            else:
+                print(f"aplay failed: {result.stderr.decode()}")
+        
+            self.current_play_obj = None  # No real object, just clear it            
         except Exception as e:
             print(f"Audio playback error: {e}")
             self.current_play_obj = None

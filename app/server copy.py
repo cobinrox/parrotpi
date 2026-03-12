@@ -89,40 +89,35 @@ else:
     # If you prefer to fail fast instead of guessing:
     # raise RuntimeError("No HifiBerry DAC found and no fallback configured")
 
-# try:
-#     audio_stream = sd.RawOutputStream(
-#         samplerate=48000,
-#         channels=1,
-#         dtype="int16",
-#         blocksize=1024,
-#         device=device_name,
-#         callback=audio_callback,
-#     )
-#     audio_stream.start()
-# except Exception as e:
-#     print(f"Failed to open audio stream on {device_name}: {e}")
-#     raise
-# def play_test_tone(frequency=440.0, duration=0.25, amplitude=0.2):
-#     # Replace startup tone with aplay too:
-#     subprocess.run(["aplay", "-D", "plughw:0,0", "/home/pi/projects/parrotpi/app/static/audio/squawk3.wav"])
+try:
+    audio_stream = sd.RawOutputStream(
+        samplerate=48000,
+        channels=1,
+        dtype="int16",
+        blocksize=1024,
+        device=device_name,
+        callback=audio_callback,
+    )
+    audio_stream.start()
+except Exception as e:
+    print(f"Failed to open audio stream on {device_name}: {e}")
+    raise
+def play_test_tone(frequency=440.0, duration=0.25, amplitude=0.2):
+    global playback_queue
+    print(f"Playing test tone at {frequency} Hz for {duration} seconds",flush=True)
+    sr = audio_stream.samplerate
+    t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+    tone = amplitude * np.sin(2 * math.pi * frequency * t)
+    int16_tone = np.int16(tone * 32767).tobytes()
 
-#     # global playback_queue
-#     # print(f"Playing test tone at {frequency} Hz for {duration} seconds",flush=True)
-#     # sr = audio_stream.samplerate
-#     # t = np.linspace(0, duration, int(sr * duration), endpoint=False)
-#     # tone = amplitude * np.sin(2 * math.pi * frequency * t)
-#     # int16_tone = np.int16(tone * 32767).tobytes()
+    # Split into 1024-frame chunks for the callback
+    chunk_size = 1024 * 2  # frames * bytes per frame
+    for i in range(0, len(int16_tone), chunk_size):
+        playback_queue.put(int16_tone[i:i + chunk_size])
+    print("Test tone queued for playback",flush=True)
 
-#     # # Split into 1024-frame chunks for the callback
-#     # chunk_size = 1024 * 2  # frames * bytes per frame
-#     # for i in range(0, len(int16_tone), chunk_size):
-#     #     playback_queue.put(int16_tone[i:i + chunk_size])
-#     # print("Test tone queued for playback",flush=True)
-
-# # Play the startup tone
-# play_test_tone()
-print("Playing start up tone")
-subprocess.run(["aplay", "-D", "plughw:0,0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
+# Play the startup tone
+play_test_tone()
 
 # ---------------------------------------------------------
 # Utility: Float32 → Int16
@@ -189,14 +184,14 @@ def handle_mic_chunk(data):
 # ---------------------------------------------------------
 # Servo Initialization
 # ---------------------------------------------------------
-# def create_servo(name, pin):
-#     logging.info(f"Initializing servo '{name}' on GPIO pin {pin}")
-#     return Servo(pin)
+def create_servo(name, pin):
+    logging.info(f"Initializing servo '{name}' on GPIO pin {pin}")
+    return Servo(pin)
 
-# servos = {
-#     name: create_servo(name, pin)
-#     for name, pin in SERVO_PINS.items()
-# }
+servos = {
+    name: create_servo(name, pin)
+    for name, pin in SERVO_PINS.items()
+}
 
 audio = Audio()
 
@@ -239,32 +234,32 @@ def servo_say():
 
     while audio.current_play_obj and audio.current_play_obj.is_playing():
         if bird == 'big':
-           #servos['beak'].open()
+           servos['beak'].open()
            time.sleep(0.1)
-           #servos['beak'].close()
+           servos['beak'].close()
            time.sleep(0.1)
-           #servos['beak'].open()
+           servos['beak'].open()
            time.sleep(0.1)
-           #servos['beak'].close()
+           servos['beak'].close()
            time.sleep(0.1)
-           #servos['beak'].open()
+           servos['beak'].open()
            time.sleep(0.1)
-           #servos['beak'].close()
+           servos['beak'].close()
            time.sleep(0.1)
         else:
-           #servos['beak'].open()
+           servos['beak'].open()
            time.sleep(0.1)
-           #servos['beak'].close()
+           servos['beak'].close()
            time.sleep(0.1)
 
     if bird == 'big':
-       #servos['beak'].close()
+       servos['beak'].close()
        time.sleep(0.1)
-       #servos['beak'].close()
+       servos['beak'].close()
        time.sleep(0.1)
-       #servos['beak'].close()
+       servos['beak'].close()
     else:
-       #servos['beak'].close()
+       servos['beak'].close()
        time.sleep(0.1)
     return jsonify({"action": "say", "phrase": phrase})
 
@@ -322,17 +317,16 @@ def amixer(cmd):
     subprocess.run(["amixer", "set", "Master", cmd], stdout=subprocess.PIPE)
 
 def get_volume():
-    return 0
     # Example amixer output line:
     #   Mono: Playback 74 [58%] [-16.50dB] [on]
-    # out = subprocess.check_output(["amixer", "get", "Master"]).decode()
-    # for line in out.splitlines():
-    #     if "%" in line:
-    #         # Extract the first [XX%]
-    #         start = line.find("[") + 1
-    #         end = line.find("%")
-    #         return int(line[start:end])
-    # return 0
+    out = subprocess.check_output(["amixer", "get", "Master"]).decode()
+    for line in out.splitlines():
+        if "%" in line:
+            # Extract the first [XX%]
+            start = line.find("[") + 1
+            end = line.find("%")
+            return int(line[start:end])
+    return 0
 @app.get("/volume")
 def volume_get():
     return jsonify({"volume": get_volume()})    
