@@ -140,14 +140,10 @@ def handle_mic_stop():
 # ---------------------------------------------------------
 # Servo Initialization
 # ---------------------------------------------------------
-# def create_servo(name, pin):
-#     logging.info(f"Initializing servo '{name}' on GPIO pin {pin}")
-#     return Servo(pin)
+def create_servo(name, pin):
+    logging.info(f"Initializing servo '{name}' on GPIO pin {pin}")
+    return Servo(pin)
 
-# servos = {
-#     name: create_servo(name, pin)
-#     for name, pin in SERVO_PINS.items()
-# }
 
 
 # ---------------------------------------------------------
@@ -253,8 +249,6 @@ def servo_say():
     thread.start()
     logging.info(f"Returning for SAY [{phrase}]")
     return jsonify({"status": "playing", "phrase": phrase}), 202                
-    
-
 
 # Optional: Add endpoint to check status
 @app.route("/audio-status")
@@ -344,6 +338,7 @@ def volume_down():
 
 
 def start():
+    global servos
     wait_for_audio_devices()
     hifiberry_idx = find_hifiberry_device()
     if hifiberry_idx is not None:
@@ -357,6 +352,11 @@ def start():
     #subprocess.run(["aplay", "-D", "plughw:0,0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
     #subprocess.run(["aplay", "-D", "dmix0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
     subprocess.run(["aplay", "-D", "plughw:0,0", "-c", "2", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
+
+    servos = {
+        name: create_servo(name, pin)
+        for name, pin in SERVO_PINS.items()
+    }
 
     logging.info("Starting Flask server...")
     logging.info("Bring up browser to https://parrotpi")
