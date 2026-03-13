@@ -55,11 +55,12 @@ echo "Creating systemd service..."
 sudo bash -c "cat > '$SERVICE_FILE'" <<EOF
 [Unit]
 Description=ParrotPi Server
-After=network-online.target
-Wants=network-online.target
+After=network-online.target sound.target
+Wants=network-online.target sound.target
 
 [Service]
 Type=simple
+ExecStartPre=/bin/sleep 2
 User=$USER_NAME
 WorkingDirectory=$PROJECT_DIR
 ExecStart=$PYTHON_BIN -m app.server

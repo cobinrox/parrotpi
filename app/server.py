@@ -8,18 +8,12 @@ eventlet.monkey_patch()
 import math
 import numpy as np
 import sounddevice as sd
-print("Sound devices:")
-print(sd.query_devices())
-
-#print ("EXITING NOW!")
-#import sys
-#sys.exit()
 
 import time
 import traceback
 import threading
-import queue
 import logging
+import numpy as np
 
 from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
@@ -32,9 +26,6 @@ from .config import SERVO_PINS
 
 logging.basicConfig(level=logging.INFO)
 
-print("DEVICES:", sd.query_devices(),flush=True)
-print("DEFAULT DEVICE:", sd.default.device)
-
 # ---------------------------------------------------------
 # Global State
 # ---------------------------------------------------------
@@ -45,24 +36,32 @@ print("or, for a service, in /etc/parrotpi.env")
 print("Or just override in the source right here if you want:")
 #bird=small
 mic_active = False
-#playback_queue = queue.Queue(maxsize=10)
+mic_buffer = b""
 
-def audio_callback(outdata, frames, time, status):
-    global playback_queue
-    print(f"Audio callback: frames = {frames} status = {status}",flush=True)
-    out = np.frombuffer(outdata, dtype=np.int16)
-    try:
-        chunk = playback_queue.get_nowait()
-        data = np.frombuffer(chunk, dtype=np.int16)
-        print("Callback got data:", len(data), "samples", "min =", data.min(), "max =", data.max(),flush=True)
-        if len(data) < frames:
-            padded = np.zeros(frames, dtype=np.int16)
-            padded[:len(data)] = data
-            out[:] = padded
-        else:
-            out[:] = data[:frames]
-    except queue.Empty:
-        out[:] = 0
+def wait_for_audio_devices(timeout=10, interval=0.5):
+    """
+    Wait until sounddevice reports at least one audio device.
+    Returns True if devices appear, False if timeout expires.
+    """
+    print("Waiting for audio devices...")
+
+    deadline = time.time() + timeout
+
+    while time.time() < deadline:
+        try:
+            devices = sd.query_devices()
+            if devices:
+                print("Audio devices detected:")
+                print(devices)
+                return True
+        except Exception as e:
+            print(f"Error querying devices: {e}")
+
+        print("No devices yet, retrying...")
+        time.sleep(interval)
+
+    print("Timed out waiting for audio devices.")
+    return False
 
 def find_hifiberry_device():
     """
@@ -77,67 +76,6 @@ def find_hifiberry_device():
             return idx
     return None
 
-# Prefer HifiBerry directly; skip Pulse unless you really need it
-hifiberry_idx = find_hifiberry_device()
-if hifiberry_idx is not None:
-    device_name = hifiberry_idx
-else:
-    # As a fallback, use a known-good hardware index (0 on your system)
-    # instead of the string 'default'
-    print("No HifiBerry DAC found by name; falling back to card index 0")
-    device_name = 0
-    # If you prefer to fail fast instead of guessing:
-    # raise RuntimeError("No HifiBerry DAC found and no fallback configured")
-
-# try:
-#     audio_stream = sd.RawOutputStream(
-#         samplerate=48000,
-#         channels=1,
-#         dtype="int16",
-#         blocksize=1024,
-#         device=device_name,
-#         callback=audio_callback,
-#     )
-#     audio_stream.start()
-# except Exception as e:
-#     print(f"Failed to open audio stream on {device_name}: {e}")
-#     raise
-# def play_test_tone(frequency=440.0, duration=0.25, amplitude=0.2):
-#     # Replace startup tone with aplay too:
-#     subprocess.run(["aplay", "-D", "plughw:0,0", "/home/pi/projects/parrotpi/app/static/audio/squawk3.wav"])
-
-#     # global playback_queue
-#     # print(f"Playing test tone at {frequency} Hz for {duration} seconds",flush=True)
-#     # sr = audio_stream.samplerate
-#     # t = np.linspace(0, duration, int(sr * duration), endpoint=False)
-#     # tone = amplitude * np.sin(2 * math.pi * frequency * t)
-#     # int16_tone = np.int16(tone * 32767).tobytes()
-
-#     # # Split into 1024-frame chunks for the callback
-#     # chunk_size = 1024 * 2  # frames * bytes per frame
-#     # for i in range(0, len(int16_tone), chunk_size):
-#     #     playback_queue.put(int16_tone[i:i + chunk_size])
-#     # print("Test tone queued for playback",flush=True)
-
-# # Play the startup tone
-# play_test_tone()
-print("Playing start up tone")
-#subprocess.run(["aplay", "-D", "plughw:0,0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
-#subprocess.run(["aplay", "-D", "dmix0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
-subprocess.run(["aplay", "-D", "plughw:0,0", "-c", "2", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
-print("Startup done - now start mic stream")
-
-# NOW start mic stream (AFTER aplay finishes)
-import queue
-import numpy as np
-import sounddevice as sd
-
-#playback_queue = queue.Queue(maxsize=10)
-mic_buffer = b""
-mic_active = False
-# ---------------------------------------------------------
-# Utility: Float32 → Int16
-# ---------------------------------------------------------
 def float32_to_int16(float32_bytes):
     arr = np.frombuffer(float32_bytes, dtype=np.float32)
     int16 = np.int16(arr * 32767)
@@ -159,6 +97,7 @@ app = Flask(__name__)
 CORS(app)
 swagger = Swagger(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
+audio = Audio()
 
 # ---------------------------------------------------------
 # Socket.IO Handlers
@@ -197,8 +136,7 @@ def handle_mic_stop():
     global mic_active, mic_buffer
     mic_active = False
     mic_buffer = b""  # Clear leftover
-#mic_stream.start()
-#print("Mic stream ready",flush=True)
+
 # ---------------------------------------------------------
 # Servo Initialization
 # ---------------------------------------------------------
@@ -210,11 +148,7 @@ def handle_mic_stop():
 #     name: create_servo(name, pin)
 #     for name, pin in SERVO_PINS.items()
 # }
-#playback_queue = queue.Queue(maxsize=10)
-#mic_stream = sd.RawOutputStream(...)  # background, silent
-#mic_stream.start()
-#print("Mic stream ready")
-audio = Audio()
+
 
 # ---------------------------------------------------------
 # Routes
@@ -228,70 +162,106 @@ def ping():
     logging.info("Received ping request")
     return jsonify({"status": "ok"})
 
+
+# Global flag to track current audio
+current_audio_active = False
+audio_lock = threading.Lock()
+
 @app.route("/say", methods=["POST"])
 def servo_say():
-    #global mic_stream
-    #mic_stream.stop()
-    global bird
+    global current_audio_active, bird
     data = request.get_json(silent=True) or {}
-    phrase = data.get("phrase")
-
-    duration = audio.get_wav_duration(audio._resolve_path("piano2.wav"))
-    logging.info(f"Received SAY request for phrase: [{phrase}], duration [{duration}]")
+    phrase = data.get("phrase", "")
+    logging.info("SAY [" + phrase + "]")
     if phrase == "Does He Talk":
-        title = "doesthebirdtalk.wav"
+        phrase = f"doesthebirdtalk"
     else:
         if phrase == "F#$@!!":
-           title = "curse.wav"
+            phrase = "curse"
         else:
-            title = phrase.lower() + ".wav"
-    base_path = Path(current_app.root_path)
-    audio_path = base_path / "static" / "audio" / title
+            phrase = "squawk3"
+    # Prevent overlapping aplay calls
+    with audio_lock:
+        if current_audio_active:
+            logging.info("Audio busy, rejecting SAY")
+            return jsonify({"status": "busy"}), 202
+        current_audio_active = True
 
-    if audio_path.is_file():
-        audioThread = audio.play(str(audio_path))
-    else:
-        current_app.logger.error(f"Missing audio file: {audio_path}")
-        audioThread = audio.play("squawk3.wav")  # fallback to a default sound
-    #audioThread = audio.play(title)
-    logging.info("Started audio thread, now controlling beak while audio plays")
+    # Quick beak twitch to show immediate response
+    print("     beak open",flush=True)
+    #servos['beak'].open ()
+    time.sleep(0.05)
+    print("     beak close",flush=True)
+    #servos['beak'].close()
+    def audio_and_beak():
+        global current_audio_active,bird
+        logging.info("Starting audio_and_beak thread...")
+        audioProcess = None
+        try:
+            audio_path = audio._resolve_path(phrase.lower() + ".wav")
+            duration = audio.get_wav_duration(audio_path)
+            logging.info(f"Prepping: [{audio_path}] (duration: [{duration:.2f}]s)")
+            
+            logging.info("Opening audioProcess")
 
-    for _ in range(20):
-        if audio.current_play_obj:
-            break
-        time.sleep(0.01)
+            audioProcess = subprocess.Popen([
+                'aplay', "-D", "plughw:0,0", "-c", "2",audio_path
+              ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            #subprocess.run(["aplay", "-D", "plughw:0,0", "-c", "2", audio_path])
 
-    while audio.current_play_obj and audio.current_play_obj.is_playing():
-        if bird == 'big':
-           #servos['beak'].open()
-           time.sleep(0.1)
-           #servos['beak'].close()
-           time.sleep(0.1)
-           #servos['beak'].open()
-           time.sleep(0.1)
-           #servos['beak'].close()
-           time.sleep(0.1)
-           #servos['beak'].open()
-           time.sleep(0.1)
-           #servos['beak'].close()
-           time.sleep(0.1)
-        else:
-           #servos['beak'].open()
-           time.sleep(0.1)
-           #servos['beak'].close()
-           time.sleep(0.1)
+            # Animate beak during playback
+            start_time = time.time()
+            end_time = None
+            while time.time() - start_time < duration + 0.3:
+                print("     beak open", flush=True)
+                #servos['beak'].open ()
+                time.sleep(0.15)
+                print("     beak close", flush=True)
+                #servos['beak'].close ()
+                time.sleep(0.12)
+                end_time = time.time()
+            actual_duration = end_time - start_time if end_time else 0
+            logging.info(f"Beak loop took {actual_duration:.2f}s")                
+            # Wait a tiny bit for ALSA to fully release the device
+            if audioProcess is not None:
+                logging.info("audioProcess was NOT yet done, waiting")
+                audioProcess.wait(timeout=1)    
+            # Clean up audioProcess
+            try:
+                logging.info("Terminate audioProcess thread")
+                audioProcess.terminate()
+                audioProcess.wait(timeout=1)
+            except:
+                audioProcess.kill()
+                
+        except Exception as e:
+            logging.error(f"Audio/beak error: {e}")
+        finally:
+            if audioProcess is not None and audioProcess.poll() is None:
+                try:
+                    logging.info("Terminate audioProcess")
+                    audioProcess.terminate()
+                    audioProcess.wait(timeout=1)
+                except Exception:
+                    audioProcess.kill()
 
-    if bird == 'big':
-       #servos['beak'].close()
-       time.sleep(0.1)
-       #servos['beak'].close()
-       time.sleep(0.1)
-       #servos['beak'].close()
-    else:
-       #servos['beak'].close()
-       time.sleep(0.1)
-    #mic_stream.start()
-    return jsonify({"action": "say", "phrase": phrase})
+            logging.info("End audioProcess thread")
+            with audio_lock:
+                current_audio_active = False
+    # Start async thread
+    thread = threading.Thread(target=audio_and_beak, daemon=True)
+    thread.start()
+    logging.info(f"Returning for SAY [{phrase}]")
+    return jsonify({"status": "playing", "phrase": phrase}), 202                
+    
+
+
+# Optional: Add endpoint to check status
+@app.route("/audio-status")
+def audio_status():
+    with audio_lock:
+        return jsonify({"is_playing": current_audio_active})
+
 
 @app.route("/servo/<name>/open", methods=["POST"])
 def servo_open(name):
@@ -374,6 +344,20 @@ def volume_down():
 
 
 def start():
+    wait_for_audio_devices()
+    hifiberry_idx = find_hifiberry_device()
+    if hifiberry_idx is not None:
+        device_name = hifiberry_idx
+    else:
+        # As a fallback, use a known-good hardware index (0 on your system)
+        # instead of the string 'default'
+        print("No HifiBerry DAC found by name; falling back to card index 0")
+        device_name = 0
+    print("Playing start up tone")
+    #subprocess.run(["aplay", "-D", "plughw:0,0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
+    #subprocess.run(["aplay", "-D", "dmix0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
+    subprocess.run(["aplay", "-D", "plughw:0,0", "-c", "2", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
+
     logging.info("Starting Flask server...")
     logging.info("Bring up browser to https://parrotpi")
     logging.info("We are running Caddy which allows us https and port 443/80")
