@@ -1,12 +1,31 @@
 import os
 import time
 import threading
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request, render_template
+from flask_cors import CORS
+from flasgger import Swagger
+from flask_socketio import SocketIO, emit
+from flask import current_app
 import sounddevice as sd
 import soundfile as sf
 from gpiozero import Servo
+import numpy as np
+import sounddevice as sd
+
+mic_active = False
+mic_stream = None
+mic_buffer = []
+
+# 48kHz stereo output for mic playback
+MIC_RATE = 48000
+MIC_CHANNELS = 2
+MIC_BLOCK = 1024
+
 
 app = Flask(__name__)
+CORS(app)
+swagger = Swagger(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # ---------------------------------------------------------
 # Servo setup
@@ -181,6 +200,81 @@ def say():
     play_with_beak(wav_path)
 
     return jsonify({"status": "played", "file": filename})
+def float32_to_stereo_float32(chunk):
+    """Convert mono float32 → stereo float32."""
+    arr = np.array(chunk, dtype=np.float32)
+    stereo = np.column_stack((arr, arr))  # duplicate channel
+    return stereo
+# -- socket handlers
+@socketio.on('mic_start')
+def handle_mic_start():
+    global mic_active, mic_stream, mic_buffer
+
+    print("mic_start received")
+    mic_active = True
+    mic_buffer = []
+
+    # Reinitialize PortAudio for this thread
+    sd._terminate()
+    sd._initialize()
+
+    # Pick correct device (I2S or fallback)
+    device_index = choose_output_device()
+    sd.default.device = (None, device_index)
+
+    # Open a continuous output stream
+    mic_stream = sd.OutputStream(
+        samplerate=MIC_RATE,
+        channels=MIC_CHANNELS,
+        dtype='float32',
+        device=device_index,
+        blocksize=MIC_BLOCK
+    )
+    mic_stream.start()
+
+    # Start beak animation
+    servo.max()
+    time.sleep(0.1)
+
+
+@socketio.on('mic_chunk')
+def handle_mic_chunk(data):
+    global mic_active, mic_stream
+
+    if not mic_active or mic_stream is None:
+        return
+
+    try:
+        # Convert incoming mono float32 → stereo float32
+        stereo = float32_to_stereo_float32(data["audio"])
+
+        # Write directly to the audio stream
+        mic_stream.write(stereo)
+
+    except Exception as e:
+        print("mic_chunk error:", e)
+
+
+@socketio.on('mic_stop')
+def handle_mic_stop():
+    global mic_active, mic_stream
+
+    print("mic_stop received")
+    mic_active = False
+
+    try:
+        if mic_stream:
+            mic_stream.stop()
+            mic_stream.close()
+    except:
+        pass
+
+    mic_stream = None
+
+    # Close beak and detach
+    servo.min()
+    time.sleep(0.1)
+    servo.detach()
 
 
 # ---------------------------------------------------------
