@@ -23,12 +23,13 @@ mic_buffer = []
 MIC_RATE = 48000
 MIC_CHANNELS = 2
 MIC_BLOCK = 1024
-
+mic_gain = 8.0
 
 app = Flask(__name__)
 CORS(app)
 swagger = Swagger(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+#socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", binary=True)
 
 # ---------------------------------------------------------
 # Servo setup
@@ -210,12 +211,24 @@ def say():
     play_with_beak(wav_path)
 
     return jsonify({"status": "played", "file": filename})
+def float32_to_stereo(chunk):
+    arr = np.array(chunk, dtype=np.float32)
+    stereo = np.column_stack((arr, arr))
+    return stereo    
 def float32_to_stereo_float32(chunk):
     """Convert mono float32 → stereo float32."""
     arr = np.array(chunk, dtype=np.float32)
     stereo = np.column_stack((arr, arr))  # duplicate channel
     return stereo
 # -- socket handlers
+@socketio.on('mic_gain')
+def handle_mic_gain(value):
+    global mic_gain
+    try:
+        mic_gain = float(value)
+        print(f"Mic gain set to {mic_gain}x")
+    except:
+        pass
 @socketio.on('mic_start')
 def handle_mic_start():
     global mic_active, mic_stream, mic_buffer
@@ -234,11 +247,11 @@ def handle_mic_start():
 
     # Open a continuous output stream
     mic_stream = sd.OutputStream(
-        samplerate=MIC_RATE,
-        channels=MIC_CHANNELS,
+        samplerate=48000, #MIC_RATE,
+        channels=2, #MIC_CHANNELS,
         dtype='float32',
         device=device_index,
-        blocksize=MIC_BLOCK
+        blocksize=1024 #MIC_BLOCK
     )
     mic_stream.start()
 
@@ -255,16 +268,26 @@ def handle_mic_chunk(data):
         return
 
     try:
-        # Convert incoming mono float32 → stereo float32
-        stereo = float32_to_stereo_float32(data["audio"])
+        # Convert raw binary → float32 mono
+        arr = np.frombuffer(data, dtype=np.float32)
 
-        # Write directly to the audio stream
+        # Apply gain
+        arr = arr * mic_gain
+
+        # Prevent clipping
+        arr = np.clip(arr, -1.0, 1.0)
+
+        # Convert mono → stereo
+        stereo = np.column_stack((arr, arr))
+
+        # Drop partial blocks
+        if stereo.shape[0] != 1024:
+            return
+
         mic_stream.write(stereo)
 
     except Exception as e:
         print("mic_chunk error:", e)
-
-
 @socketio.on('mic_stop')
 def handle_mic_stop():
     global mic_active, mic_stream
