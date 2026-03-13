@@ -108,28 +108,58 @@ def handle_mic_start():
     logging.info("1. Received mic_start from client")
     mic_active = True
 
+# --- Mic streaming state ---
+mic_active = False
+mic_buffer = bytearray()   # jitter buffer for smoothing browser timing
+MIC_TARGET_SAMPLES = 48000 // 20   # ~50ms = 2400 samples
+I2S_DEVICE = YOUR_I2S_DEVICE_INDEX   # set this at startup
+
+def float32_to_int16(arr):
+    # Convert float32 [-1,1] to int16 PCM
+    arr = np.clip(arr, -1.0, 1.0)
+    return (arr * 32767).astype(np.int16)
+
 @socketio.on('mic_chunk')
 def handle_mic_chunk(data):
     global mic_active, mic_buffer
+
     if not mic_active:
         return
 
     try:
+        # 1. Extract raw float32 audio from browser
         audio_bytes = data["audio"]
-        pcm_bytes = float32_to_int16_stereo(audio_bytes)
-        
-        # Buffer 3 chunks (~60ms), then play
-        mic_buffer += pcm_bytes
-        if len(mic_buffer) >= 3 * 4096:  # 3 chunks = ~60ms
-            # Pipe to aplay (non-blocking)
-            p = subprocess.Popen([
-                "aplay", "-D", "plughw:0,0", "-f", "S16_LE", "-r", "48000", "-c", "2"
-            ], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            p.stdin.write(mic_buffer)
-            p.stdin.close()
-            mic_buffer = b""  # Clear buffer
-    except:
-        pass
+        arr = np.frombuffer(audio_bytes, dtype=np.float32)
+
+        # 2. Convert mono float32 → int16
+        pcm_mono = float32_to_int16(arr)
+
+        # 3. Duplicate to stereo (MAX98357A expects 2 channels)
+        pcm_stereo = np.column_stack((pcm_mono, pcm_mono)).astype(np.int16)
+
+        # 4. Append to jitter buffer
+        mic_buffer.extend(pcm_stereo.tobytes())
+
+        # 5. If we have enough buffered audio, write it out
+        bytes_per_sample = 2 * 2   # int16 * 2 channels
+        if len(mic_buffer) >= MIC_TARGET_SAMPLES * bytes_per_sample:
+
+            # Take exactly one block
+            block = mic_buffer[:MIC_TARGET_SAMPLES * bytes_per_sample]
+            del mic_buffer[:MIC_TARGET_SAMPLES * bytes_per_sample]
+
+            # Convert back to numpy for PortAudio
+            block_np = np.frombuffer(block, dtype=np.int16).reshape(-1, 2)
+
+            # 6. Write to the I2S DAC
+            mic_stream.write(block_np)
+
+            # 7. Optional: amplitude for beak animation
+            amp = np.abs(block_np[:,0]).mean() / 32767.0
+            update_beak_from_amplitude(amp)
+
+    except Exception as e:
+        print("mic_chunk error:", e)
 
 @socketio.on('mic_stop')
 def handle_mic_stop():
