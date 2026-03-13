@@ -199,7 +199,11 @@ def servo_say():
             logging.info(f"Prepping: [{audio_path}] (duration: [{duration:.2f}]s)")
             
             logging.info("Opening audioProcess")
-
+            try:
+              result = subprocess.run(['pkill', '-f', 'aplay'], 
+                          capture_output=True, timeout=2)
+            except:
+              pass
             audioProcess = subprocess.Popen([
                 'aplay', "-D", "plughw:0,0", "-c", "2",audio_path
               ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -348,15 +352,23 @@ def start():
         # instead of the string 'default'
         print("No HifiBerry DAC found by name; falling back to card index 0")
         device_name = 0
-    print("Playing start up tone")
+    try:
+        logging.info("killing aplay")
+        result = subprocess.run(['pkill', '-f', 'aplay'], 
+                          capture_output=True, timeout=2)
+    except:
+        pass 
+    logging.info("Letting aplay die...")
+    time.sleep(3)   
+    logging.info("Playing tone...")
     #subprocess.run(["aplay", "-D", "plughw:0,0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
     #subprocess.run(["aplay", "-D", "dmix0", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
     subprocess.run(["aplay", "-D", "plughw:0,0", "-c", "2", "/home/u/projects/parrotpi/app/static/audio/squawk3.wav"])
 
-    servos = {
-        name: create_servo(name, pin)
-        for name, pin in SERVO_PINS.items()
-    }
+    # servos = {
+    #     name: create_servo(name, pin)
+    #     for name, pin in SERVO_PINS.items()
+    # }
 
     logging.info("Starting Flask server...")
     logging.info("Bring up browser to https://parrotpi")
