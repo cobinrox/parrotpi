@@ -202,9 +202,18 @@ def play_with_beak(wav_path):
     thread = None
 
     def _log_lsof_snd_usage():
-        """Log which processes (if any) are holding /dev/snd/*."""
+        """Log which processes (if any) are holding /dev/snd/*.
+
+        Uses globbing to avoid invoking lsof with an unexpanded wildcard.
+        """
         try:
-            res = subprocess.run(["lsof", "/dev/snd/*"], capture_output=True, text=True)
+            import glob
+            paths = glob.glob("/dev/snd/*")
+            if not paths:
+                logging.info("No /dev/snd/ device nodes found (glob returned nothing).")
+                return False
+
+            res = subprocess.run(["lsof", *paths], capture_output=True, text=True)
             out = (res.stdout or res.stderr or "").strip()
             if out:
                 logging.info(f"lsof /dev/snd/* output:\n{out}")
@@ -646,10 +655,9 @@ def handle_mic_stop():
     global mic_active, mic_stream, mic_buffer, mic_record_buffer
 
     if not mic_active:
-        logging.info("mic_stop received but mic is not active.")
-        return
-
-    logging.info("mic_stop received")
+        logging.info("mic_stop received but mic is not active; cleaning up any open stream.")
+    else:
+        logging.info("mic_stop received")
     # report queued bytes
     global mic_queue, mic_queued_bytes, mic_writer_stop, mic_writer_thread
     with mic_queue_lock:
@@ -662,7 +670,9 @@ def handle_mic_stop():
     if mic_writer_stop is not None:
         mic_writer_stop.set()
     if mic_writer_thread is not None:
-        mic_writer_thread.join(timeout=1.0)
+        mic_writer_thread.join(timeout=2.0)
+        if mic_writer_thread.is_alive():
+            logging.info("mic_writer_thread still alive after join timeout; continuing cleanup.")
 
     # clear queue
     mic_queue = None
