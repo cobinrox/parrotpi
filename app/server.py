@@ -34,6 +34,8 @@ mic_queued_bytes = 0
 mic_queue_lock = threading.Lock()
 mic_writer_thread = None
 mic_writer_stop = None
+mic_beak_thread = None
+mic_beak_stop = None
 last_chunk_time = None
 client_sample_rate = None
 mic_stream_rate = None
@@ -193,6 +195,17 @@ def beak_motion(stop_event):
     servo.min()  # close beak when done
     time.sleep(0.1)
     servo.detach()
+
+
+def stop_beak_motion():
+    """Stop any running beak-motion thread (used for mic streaming)."""
+    global mic_beak_stop, mic_beak_thread
+    if mic_beak_stop is not None:
+        mic_beak_stop.set()
+    if mic_beak_thread is not None:
+        mic_beak_thread.join(timeout=1.0)
+        if mic_beak_thread.is_alive():
+            logging.info("mic_beak_thread still alive after stop request.")
 
 # ---------------------------------------------------------
 # Helper: play WAV + animate beak
@@ -519,6 +532,14 @@ def handle_mic_start(data=None):
                             logging.info(f"mic_writer write slow: {took:.4f}s (block {BLOCK_BYTES} bytes)")
                     except Exception as e:
                         logging.info(f"mic_writer write error: {e}")
+                        # If the device becomes unavailable while streaming, stop beak motion.
+                        if "Device unavailable" in str(e) or "device not ready" in str(e).lower():
+                            logging.info("Device unavailable during mic streaming; stopping beak motion.")
+                            stop_beak_motion()
+                            # Mark stream inactive to prevent further mic chunks from being accepted.
+                            global mic_active
+                            mic_active = False
+                            return
 
             # flush any remaining partial data (pad with zeros)
             if len(local_buf) > 0:
@@ -535,8 +556,14 @@ def handle_mic_start(data=None):
         mic_writer_thread = threading.Thread(target=mic_writer, args=(mic_writer_stop,), daemon=True)
         mic_writer_thread.start()
 
+        # Start beak motion to match live mic streaming
+        global mic_beak_thread, mic_beak_stop
+        mic_beak_stop = threading.Event()
+        mic_beak_thread = threading.Thread(target=beak_motion, args=(mic_beak_stop,), daemon=True)
+        mic_beak_thread.start()
+
         mic_active = True
-        logging.info("Mic stream started and writer thread running.")
+        logging.info("Mic stream started and writer + beak threads running.")
     except Exception as e:
         logging.info(f"Failed to start mic_stream: {e}")
         mic_stream = None
@@ -666,13 +693,20 @@ def handle_mic_stop():
 
     mic_active = False
 
-    # signal writer to stop and join
+    # signal writer and beak threads to stop and join
     if mic_writer_stop is not None:
         mic_writer_stop.set()
     if mic_writer_thread is not None:
         mic_writer_thread.join(timeout=2.0)
         if mic_writer_thread.is_alive():
             logging.info("mic_writer_thread still alive after join timeout; continuing cleanup.")
+
+    if mic_beak_stop is not None:
+        mic_beak_stop.set()
+    if mic_beak_thread is not None:
+        mic_beak_thread.join(timeout=2.0)
+        if mic_beak_thread.is_alive():
+            logging.info("mic_beak_thread still alive after join timeout; continuing cleanup.")
 
     # clear queue
     mic_queue = None
