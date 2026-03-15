@@ -3,6 +3,7 @@ import eventlet
 eventlet.monkey_patch(thread=False)
 import time
 import threading
+import subprocess
 from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 from flasgger import Swagger
@@ -48,8 +49,13 @@ MIC_BLOCK = 1024
 FRAME_BYTES = 4 * MIC_CHANNELS
 # Allow up to ~10 blocks queued before dropping
 MAX_QUEUE_BYTES = MIC_BLOCK * FRAME_BYTES * 10
-# Start with unity gain; client slider is 8x but server should allow clipping control
-mic_gain = 1.0
+# Software gain multiplier applied to outgoing audio (chip has no hardware volume control)
+# A value >1.0 boosts the signal (may clip), <1.0 attenuates.
+# The client UI defaults to 8x, so use that as the initial value for a louder startup.
+MAX_MIC_GAIN = 10.0
+DEFAULT_MIC_GAIN = 8.0
+VOLUME_STEPS = 5  # Number of steps /volUp and /volDown will use (coarser control)
+mic_gain = DEFAULT_MIC_GAIN
 # Debug: when True, bypass queue and write incoming chunks immediately (for troubleshooting)
 DEBUG_IMMEDIATE_WRITE = True
 
@@ -183,6 +189,23 @@ def play_with_beak(wav_path):
     stop_event = None
     thread = None
 
+    def _log_lsof_snd_usage():
+        """Log which processes (if any) are holding /dev/snd/*.
+
+        Returns True if there appears to be a consumer holding the device.
+        """
+        try:
+            res = subprocess.run(["lsof", "/dev/snd/*"], capture_output=True, text=True)
+            out = (res.stdout or res.stderr or "").strip()
+            if out:
+                logging.info(f"lsof /dev/snd/* output:\n{out}")
+                return True
+            logging.info("lsof: no processes are using /dev/snd/*")
+            return False
+        except Exception as e:
+            logging.info(f"Failed to run lsof /dev/snd/*: {e}")
+            return True
+
     try:
         logging.info(f"Loading WAV: {wav_path}")
         audio, samplerate = sf.read(wav_path, dtype='float32')
@@ -194,25 +217,39 @@ def play_with_beak(wav_path):
 
         sd.default.device = (None, device_index)
 
-        logging.info(f"Playing audio on device {device_index}...")
+        # Apply software volume control (chip has no hardware volume control)
+        if mic_gain != 1.0:
+            audio = np.clip(audio * mic_gain, -1.0, 1.0)
 
-        # Try to start audio first
-        sd.play(audio, samplerate, device=device_index)
+        # Try playback, and if the device is unavailable, verify with lsof before retrying.
+        for attempt in range(1, 3):
+            try:
+                logging.info(f"Playing audio on device {device_index}... (attempt {attempt}/2)")
 
-        # Only start beak motion if playback started
-        stop_event = threading.Event()
-        thread = threading.Thread(target=beak_motion, args=(stop_event,))
-        thread.start()
+                sd.play(audio, samplerate, device=device_index)
 
-        sd.wait()
-        sd.stop()
+                # Only start beak motion if playback started
+                stop_event = threading.Event()
+                thread = threading.Thread(target=beak_motion, args=(stop_event,))
+                thread.start()
 
-    except sd.PortAudioError as e:
-        logging.info(f"Startup playback failed: {e}")
-        if "Device unavailable" in str(e):
-            logging.info("Device busy during startup, skipping test squawk.")
-        else:
-            logging.info("Unexpected PortAudio error during startup.")
+                sd.wait()
+                sd.stop()
+                break
+
+            except sd.PortAudioError as e:
+                logging.info(f"Startup playback failed: {e}")
+                if "Device unavailable" in str(e):
+                    busy = _log_lsof_snd_usage()
+                    if not busy and attempt < 2:
+                        logging.info("No one is using /dev/snd; retrying playback...")
+                        time.sleep(0.25)
+                        continue
+                    logging.info("Device unavailable during startup, skipping test squawk.")
+                else:
+                    logging.info("Unexpected PortAudio error during startup.")
+                break
+
     except Exception as e:
         logging.info(f"Error during play_with_beak: {e}")
     finally:
@@ -228,34 +265,36 @@ def play_with_beak(wav_path):
 # ROUTES
 # ---------------------------------------------------------
 
-mic_gain = 0.7 
 @app.route('/volume')
 def get_volume():
     """Return current volume as JSON for client bar"""
-    return jsonify({'volume': int(mic_gain * 100)})  # 0-100%
+    # Map our gain range [0..MAX_MIC_GAIN] to 0..100% for the UI
+    return jsonify({'volume': int(mic_gain / MAX_MIC_GAIN * 100)})  # 0-100%
 
 @app.route('/volUp', methods=['POST'])
 def volume_up():
-    """Increase volume by 10%"""
+    """Increase volume one step (coarser steps than 10%)."""
     global mic_gain
-    mic_gain = min(1.0, mic_gain + 0.1)
-    logging.info(f"Volume up to {mic_gain:.1%}")
-    return jsonify({'volume': int(mic_gain * 100)})
+    step = MAX_MIC_GAIN / VOLUME_STEPS
+    mic_gain = min(MAX_MIC_GAIN, mic_gain + step)
+    logging.info(f"Volume up to {mic_gain / MAX_MIC_GAIN:.1%} ({mic_gain:.2f}x)")
+    return jsonify({'volume': int(mic_gain / MAX_MIC_GAIN * 100)})
 
 @app.route('/volDown', methods=['POST'])
 def volume_down():
-    """Decrease volume by 10%"""
+    """Decrease volume one step (coarser steps than 10%)."""
     global mic_gain
-    mic_gain = max(0.0, mic_gain - 0.1)
-    logging.info(f"Volume down to {mic_gain:.1%}")
-    return jsonify({'volume': int(mic_gain * 100)})
+    step = MAX_MIC_GAIN / VOLUME_STEPS
+    mic_gain = max(0.0, mic_gain - step)
+    logging.info(f"Volume down to {mic_gain / MAX_MIC_GAIN:.1%} ({mic_gain:.2f}x)")
+    return jsonify({'volume': int(mic_gain / MAX_MIC_GAIN * 100)})
 
 @app.route('/volume/<int:percent>', methods=['POST'])
 def set_volume(percent):
     """Direct set volume 0-100"""
     global mic_gain
-    mic_gain = max(0.0, min(1.0, percent / 100.0))
-    logging.info(f"Volume set to {mic_gain:.1%}")
+    mic_gain = max(0.0, min(MAX_MIC_GAIN, (percent / 100.0) * MAX_MIC_GAIN))
+    logging.info(f"Volume set to {mic_gain / MAX_MIC_GAIN:.1%} ({mic_gain:.2f}x)")
     return jsonify({'volume': percent})
 @app.route("/")
 def index():
@@ -318,9 +357,10 @@ def handle_mic_gain(value):
     global mic_gain
     try:
         mic_gain = float(value)
-        logging.info(f"Mic gain set to {mic_gain}x")
-    except:
-        pass
+        mic_gain = max(0.0, min(MAX_MIC_GAIN, mic_gain))
+        logging.info(f"Mic gain set to {mic_gain:.2f}x ({mic_gain / MAX_MIC_GAIN:.1%})")
+    except Exception as e:
+        logging.info(f"Invalid mic_gain value: {value} ({e})")
 @socketio.on('mic_start')
 def handle_mic_start(data=None):
     global mic_active, mic_stream, mic_buffer
@@ -414,6 +454,11 @@ def handle_mic_start(data=None):
                     del local_buf[:BLOCK_BYTES]
                     try:
                         block_np = np.frombuffer(block, dtype=np.float32).reshape(-1, MIC_CHANNELS)
+
+                        # Apply software volume control (chip has no hardware volume control)
+                        if mic_gain != 1.0:
+                            block_np = np.clip(block_np * mic_gain, -1.0, 1.0)
+
                         t0 = perf_counter()
                         mic_stream.write(block_np)
                         t1 = perf_counter()
@@ -575,7 +620,9 @@ def handle_mic_stop():
     # write recorded received audio to a WAV for offline inspection
     try:
         if mic_record_buffer:
-            out_path = os.path.join("/home/u/projects/parrotpi/app/static/audio", "test.wav")
+            audio_dir = os.path.join(app.static_folder, "audio")
+            os.makedirs(audio_dir, exist_ok=True)
+            out_path = os.path.join(audio_dir, "test.wav")
             logging.info(f"Writing recorded mic to {out_path}")
             all_bytes = b"".join(mic_record_buffer)
             arr = np.frombuffer(all_bytes, dtype=np.float32).reshape(-1, MIC_CHANNELS)

@@ -103,11 +103,7 @@
 
 <div id="parrot">
 </div>
-<div style="margin-top: 20px;">
-  <label for="micGainSlider">Mic Gain</label>
-  <input id="micGainSlider" type="range" min="1" max="20" value="8" step="1">
-  <span id="micGainValue">8x</span>
-</div>
+
 <!--  VOLUME BUTTONS  -->
 <div style="display:flex; gap:20px; margin-top:10px;">
   <button onclick="volumeDown()" 
@@ -236,11 +232,6 @@ holdButton.addEventListener("mouseleave",() => { holdButton.classList.remove("ac
 const micGainSlider = document.getElementById("micGainSlider");
 const micGainValue = document.getElementById("micGainValue");
 
-micGainSlider.addEventListener("input", () => {
-    const gain = parseInt(micGainSlider.value);
-    micGainValue.textContent = gain + "x";
-    socket.emit("mic_gain", gain);
-});
 
 async function refreshVolume() {
   try {
