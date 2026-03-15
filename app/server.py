@@ -13,17 +13,45 @@ import soundfile as sf
 from gpiozero import Servo
 import numpy as np
 import sounddevice as sd
+import logging
+import queue
+from time import perf_counter
+# Recording buffer for diagnostics
+mic_record_buffer = None
+# Fix Socket.IO packet flood from audio streaming
+from engineio.payload import Payload
+Payload.max_decode_packets = 100  # Handles 40+ mic chunks/sec safely
 
+logging.basicConfig(level=logging.INFO,
+    format="%(asctime)s [%(threadName)s] %(levelname)s %(name)s - %(message)s")
 
 mic_active = False
 mic_stream = None
-mic_buffer = bytearray()
+# Replaced bytearray jitter buffer with a thread-safe queue
+mic_queue = None
+mic_queued_bytes = 0
+mic_queue_lock = threading.Lock()
+mic_writer_thread = None
+mic_writer_stop = None
+last_chunk_time = None
+client_sample_rate = None
+mic_stream_rate = None
+
+
 
 # 48kHz stereo output for mic playback
 MIC_RATE = 48000
 MIC_CHANNELS = 2
+# Align block size to client ScriptProcessor buffer (1024 frames)
 MIC_BLOCK = 1024
-mic_gain = 8.0
+# Derived constants
+FRAME_BYTES = 4 * MIC_CHANNELS
+# Allow up to ~10 blocks queued before dropping
+MAX_QUEUE_BYTES = MIC_BLOCK * FRAME_BYTES * 10
+# Start with unity gain; client slider is 8x but server should allow clipping control
+mic_gain = 1.0
+# Debug: when True, bypass queue and write incoming chunks immediately (for troubleshooting)
+DEBUG_IMMEDIATE_WRITE = True
 
 app = Flask(__name__)
 CORS(app)
@@ -58,7 +86,7 @@ def wait_for_device(device_index, timeout=8, interval=0.5):
     Waits for a specific output device index to appear.
     Returns True if ready, False if timed out.
     """
-    print(f"Waiting for audio device {device_index}...")
+    logging.info(f"Waiting for audio device {device_index}...")
 
     deadline = time.time() + timeout
 
@@ -66,15 +94,15 @@ def wait_for_device(device_index, timeout=8, interval=0.5):
         try:
             devices = sd.query_devices()
             if 0 <= device_index < len(devices):
-                print(f"Device {device_index} ready: {devices[device_index]['name']}")
+                logging.info(f"Device {device_index} ready: {devices[device_index]['name']}")
                 return True
         except Exception as e:
-            print("Error querying devices:", e)
+            logging.info(f"Error querying devices: {e}")
 
-        print("Device not ready, retrying...")
+        logging.info("Device not ready, retrying...")
         time.sleep(interval)
 
-    print(f"Timed out waiting for device {device_index}")
+    logging.info(f"Timed out waiting for device {device_index}")
     return False
 
 
@@ -82,7 +110,7 @@ def choose_output_device():
     devices = sd.query_devices()
 
     if not devices:
-        print("No audio devices found at all.")
+        logging.info("No audio devices found at all.")
         return None
 
     # Prefer I2S DAC by name
@@ -93,16 +121,16 @@ def choose_output_device():
             "max98357" in name or
             "i2s" in name
         ) and dev["max_output_channels"] >= 2:
-            print(f"Using I2S device {idx}: {dev['name']}")
+            logging.info(f"Using I2S device {idx}: {dev['name']}")
             return idx
 
     # Fallback: any stereo output
     for idx, dev in enumerate(devices):
         if dev["max_output_channels"] >= 2:
-            print(f"Using fallback device {idx}: {dev['name']}")
+            logging.info(f"Using fallback device {idx}: {dev['name']}")
             return idx
 
-    print("No usable audio output devices found.")
+    logging.info("No usable audio output devices found.")
     return None
 def startup_test_squawk():
     """
@@ -113,19 +141,27 @@ def startup_test_squawk():
 
     test_path = os.path.join("app", "static", "audio", "squawk3.wav")
 
-    print("\n=== STARTUP AUDIO TEST ===")
-    if not wait_for_alsa():
-        print("ALSA not ready, skipping startup test.")
-    else:
-        print(f"Testing audio playback with: {test_path}")
-        try:
-            #sd._terminate()
-            #sd._initialize()
-            play_with_beak(test_path)
-            print("Startup audio test completed.")
-        except Exception as e:
-            print("Startup audio test FAILED:", e)
-        print("=== END STARTUP TEST ===\n")
+    logging.info("\n=== STARTUP AUDIO TEST ===")
+    # Ensure device is available (give it some time after boot)
+    for attempt in range(1, 21):
+        device_index = choose_output_device()
+        if device_index is not None:
+            break
+        logging.info(f"Startup audio test: no device yet (attempt {attempt}/20), waiting...")
+        time.sleep(1.0)
+
+    if device_index is None:
+        logging.info("No audio output device found after retrying; skipping startup test.")
+        logging.info("=== END STARTUP TEST ===\n")
+        return
+
+    logging.info(f"Testing audio playback with: {test_path}")
+    try:
+        play_with_beak(test_path)
+        logging.info("Startup audio test completed.")
+    except Exception as e:
+        logging.info(f"Startup audio test FAILED: {e}")
+    logging.info("=== END STARTUP TEST ===\n")
 
 # ---------------------------------------------------------
 # Beak animation thread
@@ -148,17 +184,17 @@ def play_with_beak(wav_path):
     thread = None
 
     try:
-        print(f"Loading WAV: {wav_path}")
+        logging.info(f"Loading WAV: {wav_path}")
         audio, samplerate = sf.read(wav_path, dtype='float32')
 
         device_index = choose_output_device()
         if device_index is None:
-            print("No audio device available. Aborting playback.")
+            logging.info("No audio device available. Aborting playback.")
             return
 
         sd.default.device = (None, device_index)
 
-        print(f"Playing audio on device {device_index}...")
+        logging.info(f"Playing audio on device {device_index}...")
 
         # Try to start audio first
         sd.play(audio, samplerate, device=device_index)
@@ -172,13 +208,13 @@ def play_with_beak(wav_path):
         sd.stop()
 
     except sd.PortAudioError as e:
-        print(f"Startup playback failed: {e}")
+        logging.info(f"Startup playback failed: {e}")
         if "Device unavailable" in str(e):
-            print("Device busy during startup, skipping test squawk.")
+            logging.info("Device busy during startup, skipping test squawk.")
         else:
-            print("Unexpected PortAudio error during startup.")
+            logging.info("Unexpected PortAudio error during startup.")
     except Exception as e:
-        print("Error during play_with_beak:", e)
+        logging.info(f"Error during play_with_beak: {e}")
     finally:
         # Always stop the beak thread if it was started
         if stop_event is not None:
@@ -187,7 +223,7 @@ def play_with_beak(wav_path):
             thread.join()
 
         servo.detach()
-        print("Playback complete.")
+        logging.info("Playback complete.")
 # ---------------------------------------------------------
 # ROUTES
 # ---------------------------------------------------------
@@ -203,7 +239,7 @@ def volume_up():
     """Increase volume by 10%"""
     global mic_gain
     mic_gain = min(1.0, mic_gain + 0.1)
-    print(f"Volume up to {mic_gain:.1%}")
+    logging.info(f"Volume up to {mic_gain:.1%}")
     return jsonify({'volume': int(mic_gain * 100)})
 
 @app.route('/volDown', methods=['POST'])
@@ -211,7 +247,7 @@ def volume_down():
     """Decrease volume by 10%"""
     global mic_gain
     mic_gain = max(0.0, mic_gain - 0.1)
-    print(f"Volume down to {mic_gain:.1%}")
+    logging.info(f"Volume down to {mic_gain:.1%}")
     return jsonify({'volume': int(mic_gain * 100)})
 
 @app.route('/volume/<int:percent>', methods=['POST'])
@@ -219,7 +255,7 @@ def set_volume(percent):
     """Direct set volume 0-100"""
     global mic_gain
     mic_gain = max(0.0, min(1.0, percent / 100.0))
-    print(f"Volume set to {mic_gain:.1%}")
+    logging.info(f"Volume set to {mic_gain:.1%}")
     return jsonify({'volume': percent})
 @app.route("/")
 def index():
@@ -245,14 +281,15 @@ def beak_close():
 def say():
     data = request.get_json()
     phrase = data.get("phrase", "").strip()
-    print(f"SAY received phrase: {phrase}")
+    logging.info(f"SAY received phrase: {phrase}")
 
     # Map phrases → WAV files
     phrase_map = {
         "Does He Talk": "doesthebirdtalk.wav",
         "Squawk3": "squawk3.wav",
         "F#$@!": "curse.wav",
-        "Hi": "hi.wav"
+        "Hi": "hi.wav",
+        "test": "test.wav"
     }
 
     filename = phrase_map.get(phrase, "squawk3.wav")
@@ -281,21 +318,41 @@ def handle_mic_gain(value):
     global mic_gain
     try:
         mic_gain = float(value)
-        print(f"Mic gain set to {mic_gain}x")
+        logging.info(f"Mic gain set to {mic_gain}x")
     except:
         pass
 @socketio.on('mic_start')
-def handle_mic_start():
+def handle_mic_start(data=None):
     global mic_active, mic_stream, mic_buffer
 
-    print("mic_start received")
+    logging.info("mic_start received")
+
+    # Log client sample rate if provided
+    global client_sample_rate
+    try:
+        if data and isinstance(data, dict) and 'sampleRate' in data:
+            client_sample_rate = float(data.get('sampleRate'))
+            logging.info(f"Client sampleRate: {client_sample_rate}")
+        else:
+            client_sample_rate = None
+    except Exception as e:
+        logging.info(f"Error parsing client sampleRate: {e}")
 
     # Stop any leftover playback
     sd.stop()
 
     # Reset state
     mic_active = False
-    mic_buffer = bytearray()
+    # initialize the queue and bookkeeping
+    global mic_queue, mic_queued_bytes, mic_writer_thread, mic_writer_stop, last_chunk_time
+    mic_queue = queue.Queue()
+    with mic_queue_lock:
+        mic_queued_bytes = 0
+    mic_writer_stop = threading.Event()
+    last_chunk_time = None
+    # start fresh record buffer
+    global mic_record_buffer
+    mic_record_buffer = []
 
     # Close previous stream
     if mic_stream is not None:
@@ -310,36 +367,127 @@ def handle_mic_start():
     # Pick device
     device_index = choose_output_device()
     if device_index is None:
-        print("Cannot start mic: no output device.")
+        logging.info("Cannot start mic: no output device.")
         return
 
     try:
+        # Use the device default samplerate (may be 44100) to avoid driver resampling artifacts.
+        device_info = sd.query_devices(device_index)
+        stream_rate = int(device_info.get('default_samplerate', MIC_RATE))
         mic_stream = sd.OutputStream(
-            samplerate=44100,
-            channels=2,
+            samplerate=stream_rate,
+            channels=MIC_CHANNELS,
             dtype='float32',   # <-- float32 end-to-end
             device=device_index,
-            blocksize=0
+            blocksize=MIC_BLOCK
         )
         mic_stream.start()
+
+        # remember actual stream rate for resampling
+        global mic_stream_rate
+        mic_stream_rate = stream_rate
+
+        logging.info(f"Stream samplerate={mic_stream.samplerate}, latency={mic_stream.latency}")
+        logging.info(f"Device info: {device_info}")
+
+        # Start writer thread that consumes mic_queue and writes aligned blocks
+        def mic_writer(stop_event):
+            global mic_queued_bytes
+            local_buf = bytearray()
+            FRAME_BYTES = 4 * MIC_CHANNELS
+            BLOCK_BYTES = MIC_BLOCK * FRAME_BYTES
+            while not stop_event.is_set() or not mic_queue.empty():
+                try:
+                    chunk = mic_queue.get(timeout=0.1)
+                except queue.Empty:
+                    # if no data, loop again and allow stop_event checks
+                    continue
+
+                # chunk is raw bytes
+                local_buf.extend(chunk)
+                with mic_queue_lock:
+                    mic_queued_bytes -= len(chunk)
+
+                # write full blocks
+                while len(local_buf) >= BLOCK_BYTES:
+                    block = local_buf[:BLOCK_BYTES]
+                    del local_buf[:BLOCK_BYTES]
+                    try:
+                        block_np = np.frombuffer(block, dtype=np.float32).reshape(-1, MIC_CHANNELS)
+                        t0 = perf_counter()
+                        mic_stream.write(block_np)
+                        t1 = perf_counter()
+                        took = t1 - t0
+                        if took > (MIC_BLOCK / MIC_RATE) * 2:
+                            logging.info(f"mic_writer write slow: {took:.4f}s (block {BLOCK_BYTES} bytes)")
+                    except Exception as e:
+                        logging.info(f"mic_writer write error: {e}")
+
+            # flush any remaining partial data (pad with zeros)
+            if len(local_buf) > 0:
+                # pad to full block
+                pad_needed = BLOCK_BYTES - len(local_buf)
+                if pad_needed > 0:
+                    local_buf.extend(b"\x00" * pad_needed)
+                try:
+                    block_np = np.frombuffer(local_buf, dtype=np.float32).reshape(-1, MIC_CHANNELS)
+                    mic_stream.write(block_np)
+                except Exception as e:
+                    logging.info(f"mic_writer final write error: {e}")
+
+        mic_writer_thread = threading.Thread(target=mic_writer, args=(mic_writer_stop,), daemon=True)
+        mic_writer_thread.start()
+
         mic_active = True
-        print("Mic stream started.")
+        logging.info("Mic stream started and writer thread running.")
     except Exception as e:
-        print("Failed to start mic_stream:", e)
+        logging.info(f"Failed to start mic_stream: {e}")
         mic_stream = None
         mic_active = False
 
 @socketio.on('mic_chunk')
 def handle_mic_chunk(data):
-    global mic_active, mic_stream, mic_buffer, mic_gain
+    global mic_active, mic_stream, mic_buffer, mic_gain, mic_queue, mic_queued_bytes, last_chunk_time
 
     if not mic_active or mic_stream is None or not mic_stream.active:
-        print("Mic chunk received but mic is not active or stream not ready.")
+        logging.info("Mic chunk received but mic is not active or stream not ready.")
         return
 
     try:
-        # Convert raw binary → float32 mono
-        arr = np.frombuffer(data, dtype=np.float32)
+        # arrival timing diagnostics
+        now = perf_counter()
+        if last_chunk_time is None:
+            delta = 0.0
+        else:
+            delta = now - last_chunk_time
+        last_chunk_time = now
+
+        # Convert raw binary → float32 mono (explicit little-endian)
+        try:
+            arr = np.frombuffer(data, dtype='<f4')
+        except Exception:
+            arr = np.frombuffer(data, dtype=np.float32)
+
+        # Ensure native dtype and contiguous
+        arr = arr.astype(np.float32, copy=False)
+
+        # Quick stats for diagnostics
+        try:
+            a0 = float(arr[0]) if arr.size > 0 else 0.0
+            a_mean = float(np.mean(arr[:min(len(arr), 64)]))
+            a_min = float(np.min(arr[:min(len(arr), 64)]))
+            a_max = float(np.max(arr[:min(len(arr), 64)]))
+            logging.info(f"mic_chunk stats: first={a0:.4f}, mean64={a_mean:.4f}, min64={a_min:.4f}, max64={a_max:.4f}")
+        except Exception:
+            pass
+
+        # If client and stream sample rates differ, resample (simple linear interpolation)
+        if client_sample_rate and mic_stream_rate and client_sample_rate != mic_stream_rate:
+            target_len = int(round(len(arr) * (mic_stream_rate / client_sample_rate)))
+            if target_len != len(arr) and len(arr) > 1:
+                orig_x = np.arange(len(arr))
+                target_x = np.linspace(0, len(arr) - 1, target_len)
+                arr = np.interp(target_x, orig_x, arr).astype(np.float32)
 
         # Apply gain + prevent clipping
         arr = np.clip(arr * mic_gain, -1.0, 1.0)
@@ -347,37 +495,97 @@ def handle_mic_chunk(data):
         # Duplicate mono → stereo float32
         stereo = np.column_stack((arr, arr)).astype(np.float32)
 
-        # Add to jitter buffer
-        mic_buffer.extend(stereo.tobytes())
+        chunk_bytes = stereo.tobytes()
 
-        # Write in 20ms blocks
-        FRAME_BYTES = 4 * 2  # float32 * 2 channels
-        BLOCK_SAMPLES = 960
-        BLOCK_BYTES = BLOCK_SAMPLES * FRAME_BYTES
+        # Immediate debug write path
+        if DEBUG_IMMEDIATE_WRITE and mic_stream is not None and mic_stream.active:
+            try:
+                total_frames = stereo.shape[0]
+                written_frames = 0
+                BLOCK = MIC_BLOCK
+                while written_frames < total_frames:
+                    end = min(written_frames + BLOCK, total_frames)
+                    slice_np = stereo[written_frames:end]
+                    # pad last block if needed
+                    if slice_np.shape[0] < BLOCK:
+                        pad = np.zeros((BLOCK - slice_np.shape[0], MIC_CHANNELS), dtype=np.float32)
+                        slice_np = np.vstack((slice_np, pad))
 
-        while len(mic_buffer) >= BLOCK_BYTES:
-            block = mic_buffer[:BLOCK_BYTES]
-            del mic_buffer[:BLOCK_BYTES]
+                    t0 = perf_counter()
+                    mic_stream.write(slice_np)
+                    t1 = perf_counter()
+                    took = t1 - t0
+                    if took > (MIC_BLOCK / MIC_RATE) * 2:
+                        logging.info(f"DEBUG write slow: {took:.4f}s for {slice_np.shape[0]} frames")
+                    written_frames = end
+                logging.info(f"DEBUG immediate write: wrote {total_frames} frames")
+            except Exception as e:
+                logging.info(f"DEBUG immediate write error: {e}")
+        else:
+            # enqueue for writer thread (with queue cap)
+            if mic_queue is not None:
+                with mic_queue_lock:
+                    projected = mic_queued_bytes + len(chunk_bytes)
+                if projected > MAX_QUEUE_BYTES:
+                    logging.info(f"Dropping mic_chunk: queue full ({mic_queued_bytes} bytes) > {MAX_QUEUE_BYTES}")
+                else:
+                    mic_queue.put(chunk_bytes)
+                    with mic_queue_lock:
+                        mic_queued_bytes += len(chunk_bytes)
 
-            block_np = np.frombuffer(block, dtype=np.float32).reshape(-1, 2)
-            mic_stream.write(block_np)
+        # append to record buffer for post-test inspection
+        try:
+            if mic_record_buffer is not None:
+                mic_record_buffer.append(chunk_bytes)
+        except Exception:
+            pass
+        # log diagnostics
+        logging.info(f"mic_chunk received: {len(data)} bytes, stereo {len(chunk_bytes)} bytes, delta {delta:.3f}s, queued {mic_queued_bytes} bytes, debug_immediate={DEBUG_IMMEDIATE_WRITE}")
 
     except Exception as e:
-        print("mic_chunk error:", e)
+        logging.info(f"mic_chunk error: {e}")
 @socketio.on('mic_stop')
 def handle_mic_stop():
-    global mic_active, mic_stream, mic_buffer
+    global mic_active, mic_stream, mic_buffer, mic_record_buffer
 
     if not mic_active:
-        print("mic_stop received but mic is not active.")
+        logging.info("mic_stop received but mic is not active.")
         return
 
-    print("mic_stop received")
-    print(f"Mic buffer had {len(mic_buffer)} bytes at stop time.")
+    logging.info("mic_stop received")
+    # report queued bytes
+    global mic_queue, mic_queued_bytes, mic_writer_stop, mic_writer_thread
+    with mic_queue_lock:
+        queued = mic_queued_bytes
+    logging.info(f"Mic queued bytes at stop time: {queued}")
 
     mic_active = False
-    mic_buffer = bytearray()
 
+    # signal writer to stop and join
+    if mic_writer_stop is not None:
+        mic_writer_stop.set()
+    if mic_writer_thread is not None:
+        mic_writer_thread.join(timeout=1.0)
+
+    # clear queue
+    mic_queue = None
+    with mic_queue_lock:
+        mic_queued_bytes = 0
+
+    # write recorded received audio to a WAV for offline inspection
+    try:
+        if mic_record_buffer:
+            out_path = os.path.join("/home/u/projects/parrotpi/app/static/audio", "test.wav")
+            logging.info(f"Writing recorded mic to {out_path}")
+            all_bytes = b"".join(mic_record_buffer)
+            arr = np.frombuffer(all_bytes, dtype=np.float32).reshape(-1, MIC_CHANNELS)
+            # choose rate reported by client if available
+            rate = int(client_sample_rate) if client_sample_rate else MIC_RATE
+            sf.write(out_path, arr, rate, format='WAV', subtype='FLOAT')
+    except Exception as e:
+        logging.info(f"Failed to write mic_record.wav: {e}")
+    finally:
+        mic_record_buffer = None
     if mic_stream is not None:
         try:
             if mic_stream.active:

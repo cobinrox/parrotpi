@@ -141,7 +141,7 @@
   <button onclick="sayPhrase('Does He Talk')" class="quickBtn">Does He Talk</button>
   <button onclick="sayPhrase('F#$@!!')" class="quickBtn">F#$@!!</button>
   <button onclick="sayPhrase('Squawk3')" class="quickBtn">Squawk3</button>
-  <button onclick="sayPhrase('Gesundheit')" class="quickBtn">Gesundheit</button>
+  <button onclick="sayPhrase('test')" class="quickBtn">test</button>
 </div>
 
 <!-- SERVO CONTROL ROW -->
@@ -216,7 +216,7 @@ async function startMic() {
     };
   }
   console.log("emitting mic_start")
-  socket.emit("mic_start");
+  socket.emit("mic_start", { sampleRate: audioContext.sampleRate });
 }
 
 function stopMic() {
