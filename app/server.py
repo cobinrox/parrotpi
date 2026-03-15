@@ -55,7 +55,19 @@ MAX_QUEUE_BYTES = MIC_BLOCK * FRAME_BYTES * 10
 MAX_MIC_GAIN = 10.0
 DEFAULT_MIC_GAIN = 8.0
 VOLUME_STEPS = 5  # Number of steps /volUp and /volDown will use (coarser control)
+
+# Pitch shift “parrot effect”: percent faster than real-time (e.g., 8% faster -> 1.08x)
+PARROT_MIN_PCT = 8
+PARROT_MAX_PCT = 20
+parrot_pct = PARROT_MIN_PCT
+
 mic_gain = DEFAULT_MIC_GAIN
+
+
+def get_parrot_factor():
+    """Return the current playback rate multiplier (1.0 = normal speed)."""
+    return 1.0 + (parrot_pct / 100.0)
+
 # Debug: when True, bypass queue and write incoming chunks immediately (for troubleshooting)
 DEBUG_IMMEDIATE_WRITE = True
 
@@ -190,10 +202,7 @@ def play_with_beak(wav_path):
     thread = None
 
     def _log_lsof_snd_usage():
-        """Log which processes (if any) are holding /dev/snd/*.
-
-        Returns True if there appears to be a consumer holding the device.
-        """
+        """Log which processes (if any) are holding /dev/snd/*."""
         try:
             res = subprocess.run(["lsof", "/dev/snd/*"], capture_output=True, text=True)
             out = (res.stdout or res.stderr or "").strip()
@@ -205,6 +214,9 @@ def play_with_beak(wav_path):
         except Exception as e:
             logging.info(f"Failed to run lsof /dev/snd/*: {e}")
             return True
+
+    def _parrot_factor():
+        return 1.0 + (parrot_pct / 100.0)
 
     try:
         logging.info(f"Loading WAV: {wav_path}")
@@ -221,10 +233,27 @@ def play_with_beak(wav_path):
         if mic_gain != 1.0:
             audio = np.clip(audio * mic_gain, -1.0, 1.0)
 
+        # Apply parrot pitch shift by resampling audio (keeps output sample rate valid)
+        if parrot_pct != 0:
+            factor = _parrot_factor()
+            target_len = int(round(len(audio) / factor))
+            if target_len > 1 and len(audio) > 1:
+                orig_x = np.arange(len(audio))
+                target_x = np.linspace(0, len(audio) - 1, target_len)
+                if audio.ndim == 1:
+                    audio = np.interp(target_x, orig_x, audio).astype(np.float32)
+                else:
+                    # Resample per channel
+                    channels = [
+                        np.interp(target_x, orig_x, audio[:, c])
+                        for c in range(audio.shape[1])
+                    ]
+                    audio = np.vstack(channels).T.astype(np.float32)
+
         # Try playback, and if the device is unavailable, verify with lsof before retrying.
         for attempt in range(1, 3):
             try:
-                logging.info(f"Playing audio on device {device_index}... (attempt {attempt}/2)")
+                logging.info(f"Playing audio on device {device_index} (parrot {parrot_pct}% -> {get_parrot_factor():.3f}x) ... (attempt {attempt}/2)")
 
                 sd.play(audio, samplerate, device=device_index)
 
@@ -296,6 +325,20 @@ def set_volume(percent):
     mic_gain = max(0.0, min(MAX_MIC_GAIN, (percent / 100.0) * MAX_MIC_GAIN))
     logging.info(f"Volume set to {mic_gain / MAX_MIC_GAIN:.1%} ({mic_gain:.2f}x)")
     return jsonify({'volume': percent})
+
+@app.route('/parrot')
+def get_parrot():
+    """Return current parrot pitch percent"""
+    return jsonify({'parrot': parrot_pct})
+
+@app.route('/parrot/<int:percent>', methods=['POST'])
+def set_parrot(percent):
+    """Set parrot pitch percent (8-20)"""
+    global parrot_pct
+    parrot_pct = max(PARROT_MIN_PCT, min(PARROT_MAX_PCT, percent))
+    logging.info(f"Parrot pitch set to {parrot_pct}% (factor {get_parrot_factor():.3f}x)")
+    return jsonify({'parrot': parrot_pct})
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -423,11 +466,11 @@ def handle_mic_start(data=None):
         )
         mic_stream.start()
 
-        # remember actual stream rate for resampling
+        # remember base stream rate (for resampling client audio if needed)
         global mic_stream_rate
         mic_stream_rate = stream_rate
 
-        logging.info(f"Stream samplerate={mic_stream.samplerate}, latency={mic_stream.latency}")
+        logging.info(f"Stream samplerate={mic_stream.samplerate} (base {stream_rate}), latency={mic_stream.latency}")
         logging.info(f"Device info: {device_info}")
 
         # Start writer thread that consumes mic_queue and writes aligned blocks
@@ -534,6 +577,15 @@ def handle_mic_chunk(data):
                 target_x = np.linspace(0, len(arr) - 1, target_len)
                 arr = np.interp(target_x, orig_x, arr).astype(np.float32)
 
+        # Apply parrot pitch (speed up) by resampling. This makes live mic sound higher.
+        if parrot_pct != 0:
+            factor = get_parrot_factor()
+            target_len = int(round(len(arr) / factor))
+            if target_len > 1 and len(arr) > 1:
+                orig_x = np.arange(len(arr))
+                target_x = np.linspace(0, len(arr) - 1, target_len)
+                arr = np.interp(target_x, orig_x, arr).astype(np.float32)
+
         # Apply gain + prevent clipping
         arr = np.clip(arr * mic_gain, -1.0, 1.0)
 
@@ -626,6 +678,23 @@ def handle_mic_stop():
             logging.info(f"Writing recorded mic to {out_path}")
             all_bytes = b"".join(mic_record_buffer)
             arr = np.frombuffer(all_bytes, dtype=np.float32).reshape(-1, MIC_CHANNELS)
+
+            # Apply parrot pitch to the saved recording as well
+            if parrot_pct != 0:
+                factor = get_parrot_factor()
+                target_len = int(round(len(arr) / factor))
+                if target_len > 1 and len(arr) > 1:
+                    orig_x = np.arange(len(arr))
+                    target_x = np.linspace(0, len(arr) - 1, target_len)
+                    if arr.ndim == 1:
+                        arr = np.interp(target_x, orig_x, arr).astype(np.float32)
+                    else:
+                        channels = [
+                            np.interp(target_x, orig_x, arr[:, c])
+                            for c in range(arr.shape[1])
+                        ]
+                        arr = np.vstack(channels).T.astype(np.float32)
+
             # choose rate reported by client if available
             rate = int(client_sample_rate) if client_sample_rate else MIC_RATE
             sf.write(out_path, arr, rate, format='WAV', subtype='FLOAT')

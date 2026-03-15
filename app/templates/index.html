@@ -124,6 +124,14 @@
 </div>
 <!--  END VOLUME BUTTONS  -->
 
+<div style="margin-top: 16px; width: 220px;">
+  <div style="font-size:0.8rem; color:#aaa; margin-bottom:4px;">parrot pitch</div>
+  <div style="display:flex; gap:10px; align-items:center;">
+    <input id="parrotSlider" type="range" min="8" max="20" value="8" step="1" style="flex:1;">
+    <span id="parrotValue" style="width:48px; text-align:right; font-size:0.85rem;">+8%</span>
+  </div>
+</div>
+
 <button id="holdButton">HOLD TO<br>TALK</button>
 
 <div class="meter-wrap" id="meterWrap">
@@ -225,13 +233,35 @@ function stopMic() {
     meterWrap.classList.remove("visible");
 }
 
-// Button Events
-holdButton.addEventListener("mousedown", () => { holdButton.classList.add("active"); startMic(); });
-holdButton.addEventListener("mouseup",   () => { holdButton.classList.remove("active"); stopMic(); });
-holdButton.addEventListener("mouseleave",() => { holdButton.classList.remove("active"); stopMic(); });
-const micGainSlider = document.getElementById("micGainSlider");
-const micGainValue = document.getElementById("micGainValue");
+function initUI() {
+  const holdButton = document.getElementById("holdButton");
+  const micGainSlider = document.getElementById("micGainSlider");
+  const micGainValue = document.getElementById("micGainValue");
+  const parrotSlider = document.getElementById("parrotSlider");
+  const parrotValue = document.getElementById("parrotValue");
 
+  if (holdButton) {
+    holdButton.addEventListener("mousedown", () => { holdButton.classList.add("active"); startMic(); });
+    holdButton.addEventListener("mouseup",   () => { holdButton.classList.remove("active"); stopMic(); });
+    holdButton.addEventListener("mouseleave",() => { holdButton.classList.remove("active"); stopMic(); });
+  }
+
+  if (micGainSlider && micGainValue) {
+    micGainSlider.addEventListener("input", () => {
+      const gain = parseInt(micGainSlider.value);
+      micGainValue.textContent = gain + "x";
+      socket.emit("mic_gain", gain);
+    });
+  }
+
+  if (parrotSlider && parrotValue) {
+    parrotSlider.addEventListener("input", () => {
+      const pct = parseInt(parrotSlider.value);
+      parrotValue.textContent = "+" + pct + "%";
+      setParrot(pct);
+    });
+  }
+}
 
 async function refreshVolume() {
   try {
@@ -242,6 +272,30 @@ async function refreshVolume() {
     document.getElementById("volumeBar").style.width = vol + "%";
   } catch (err) {
     console.error("Failed to get volume:", err);
+  }
+}
+
+async function refreshParrot() {
+  try {
+    const res = await fetch('/parrot');
+    const data = await res.json();
+    const pct = data.parrot;
+    parrotSlider.value = pct;
+    parrotValue.textContent = "+" + pct + "%";
+  } catch (err) {
+    console.error("Failed to get parrot pitch:", err);
+  }
+}
+
+async function setParrot(pct) {
+  try {
+    const res = await fetch(`/parrot/${pct}`, { method: 'POST' });
+    const data = await res.json();
+    const newPct = data.parrot;
+    parrotSlider.value = newPct;
+    parrotValue.textContent = "+" + newPct + "%";
+  } catch (err) {
+    console.error("Failed to set parrot pitch:", err);
   }
 }
 
@@ -294,8 +348,12 @@ function beakMid() {
 function beakOpen() {
   fetch('/servo/beak/open', { method: "POST" });
 }
-// Load volume on page startup
-window.addEventListener("load", refreshVolume);
+// Initialize UI and load current settings on page startup
+window.addEventListener("load", () => {
+  initUI();
+  refreshVolume();
+  refreshParrot();
+});
 
 </script>
 </body>
