@@ -125,7 +125,7 @@ def say():
         "Does He Talk": "doesthebirdtalk.wav",
         "Squawk3": "squawk3.wav",
         "F#$@!!": "curse.wav",
-        "Hi": "piano2.wav",
+        "mombeatsme": "mombeatsme.wav",
         "test": "test.wav"
     }
 
@@ -211,28 +211,57 @@ def play_wav(filename):
     if not filepath.exists():
         print(f"❌ Missing: {filepath}")
         return
+
     try:
         print(f"🎵 Playing: {filename}")
-        data, fs = sf.read(str(filepath))
+
+        # Always get 2D array: shape (frames, channels)
+        data, fs = sf.read(str(filepath), always_2d=True)  # (N, C)
+
+        # Parrot speed factor
         parrot_factor = 1.0 + (parrot_pct / 100.0)
+
         if parrot_factor != 1.0:
-            target_length = int(len(data) / parrot_factor)
-            time_axis = np.linspace(0, len(data)/fs, target_length)
-            orig_time = np.linspace(0, 1, len(data))
-            data = np.interp(time_axis, orig_time, data)
-        if len(data.shape) == 1:
-            data = np.stack([data, data], axis=1)
-        data = data.astype(np.float32)
+            # Resample each channel independently
+            n_frames, n_channels = data.shape
+            target_length = int(n_frames / parrot_factor)
+
+            # Time axes as 1D
+            orig_t = np.linspace(0.0, 1.0, n_frames, endpoint=False)
+            new_t = np.linspace(0.0, 1.0, target_length, endpoint=False)
+
+            new_data = np.zeros((target_length, n_channels), dtype=np.float32)
+            for ch in range(n_channels):
+                new_data[:, ch] = np.interp(new_t, orig_t, data[:, ch])
+
+            data = new_data
+        else:
+            # Just ensure float32 and 2D
+            data = data.astype(np.float32)
+
+        # Ensure stereo output (duplicate mono if needed)
+        if data.shape[1] == 1:
+            data = np.repeat(data, 2, axis=1)  # (N, 2)
+
+        # Queue in chunks
         chunk_size = 1024
-        for i in range(0, len(data), chunk_size):
-            chunk = data[i:i+chunk_size]
-            if len(chunk) < chunk_size:
-                chunk = np.pad(chunk, ((0, chunk_size-len(chunk)), (0,0)))
+        total_frames = data.shape[0]
+        for i in range(0, total_frames, chunk_size):
+            chunk = data[i:i + chunk_size]
+
+            # Pad last chunk if short
+            if chunk.shape[0] < chunk_size:
+                pad_rows = chunk_size - chunk.shape[0]
+                chunk = np.pad(chunk, ((0, pad_rows), (0, 0)))
+
             audio_queue.put(chunk)
+
         if not beak_moving:
             threading.Thread(target=animate_beak, daemon=True).start()
+
     except Exception as e:
-        print(f"❌ Play error: {e}")
+        print(f"❌ Play error in play_wav({filename}): {e}")
+
 
 # ===== SOCKET.IO =====
 @socketio.on('mic_start')
