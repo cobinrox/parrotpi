@@ -16,7 +16,11 @@ import sys
 from pathlib import Path
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(threadName)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 
 # Audio constants
 MAX_MIC_GAIN = 5.0
