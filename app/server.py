@@ -279,21 +279,69 @@ def handle_mic_start(data):
     if not beak_moving:
         threading.Thread(target=animate_beak, daemon=True).start()
 
+# @socketio.on('mic_chunk')
+# def handle_mic_chunk(data):
+#     if mic_active:
+#         try:
+#             audio_data = np.frombuffer(data, dtype=np.float32)
+#             if len(audio_data) > 0:
+#                 if len(audio_data.shape) == 1:
+#                     audio_data = np.stack([audio_data, audio_data], axis=1)
+#                 if len(audio_data) > 1024:
+#                     audio_data = audio_data[:1024]
+#                 else:
+#                     audio_data = np.pad(audio_data, ((0, 1024-len(audio_data)), (0,0)))
+#                 audio_queue.put(audio_data)
+#         except:
+#             pass
 @socketio.on('mic_chunk')
 def handle_mic_chunk(data):
     if mic_active:
         try:
+            # Convert buffer → numpy
             audio_data = np.frombuffer(data, dtype=np.float32)
-            if len(audio_data) > 0:
+            if len(audio_data) == 0:
+                return
+
+            # **PARROT PITCH RESAMPLING** (same as play_wav)
+            parrot_factor = 1.0 + (parrot_pct / 100.0)
+            
+            if parrot_factor != 1.0 and len(audio_data) > 128:  # Skip tiny chunks
+                # Resample this chunk (faster = higher pitch)
+                orig_len = len(audio_data)
+                target_len = int(orig_len / parrot_factor)
+                
+                orig_t = np.linspace(0.0, 1.0, orig_len, endpoint=False)
+                new_t = np.linspace(0.0, 1.0, target_len, endpoint=False)
+                
+                # Handle mono input (browser sends mono)
                 if len(audio_data.shape) == 1:
-                    audio_data = np.stack([audio_data, audio_data], axis=1)
-                if len(audio_data) > 1024:
-                    audio_data = audio_data[:1024]
+                    # Resample mono → duplicate to stereo
+                    resampled_mono = np.interp(new_t, orig_t, audio_data)
+                    audio_data = np.stack([resampled_mono, resampled_mono], axis=1)
                 else:
-                    audio_data = np.pad(audio_data, ((0, 1024-len(audio_data)), (0,0)))
-                audio_queue.put(audio_data)
-        except:
-            pass
+                    # Stereo: resample each channel
+                    audio_data = audio_data.reshape(-1, 2)
+                    resampled_l = np.interp(new_t, orig_t[:len(audio_data)], audio_data[:, 0])
+                    resampled_r = np.interp(new_t, orig_t[:len(audio_data)], audio_data[:, 1])
+                    audio_data = np.stack([resampled_l, resampled_r], axis=1)
+            
+            # Ensure stereo if no resampling
+            elif len(audio_data.shape) == 1:
+                audio_data = np.stack([audio_data, audio_data], axis=1)
+
+            # Pad/truncate to exact 1024 frames
+            if len(audio_data) > 1024:
+                audio_data = audio_data[:1024]
+            else:
+                pad_frames = 1024 - len(audio_data)
+                audio_data = np.pad(audio_data, ((0, pad_frames), (0, 0)))
+
+            # Queue for playback
+            audio_queue.put(audio_data)
+
+        except Exception as e:
+            print(f"Mic chunk error: {e}")
 
 @socketio.on('mic_stop')
 def handle_mic_stop():
@@ -329,7 +377,7 @@ if __name__ == '__main__':
         logging.info(f"Unexpected error: {e}")
     finally:
         # CRITICAL: RELEASE AUDIO CHIP
-        logging.info("🔊 Releasing audio device...")
+        logging.info("Releasing audio device...")
         try:
             # Stop and close sounddevice stream
             if 'audio_stream' in globals() and audio_stream:
