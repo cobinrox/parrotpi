@@ -32,9 +32,9 @@ PARROT_MAX_PCT = 20
 BASE_DIR = Path(__file__).parent  # /home/u/projects/parrotpi/app
 AUDIO_DIR = BASE_DIR / 'static' / 'audio'
 TEMPLATES_DIR = BASE_DIR / 'templates'
-print(f"🎵 Audio: {AUDIO_DIR.absolute()}")
-print(f"📄 Templates: {TEMPLATES_DIR.absolute()}")
-print(f"🎵 WAVs: {[f.name for f in AUDIO_DIR.glob('*.wav')]}")
+logging.info(f"Audio: {AUDIO_DIR.absolute()}")
+logging.info(f"Templates: {TEMPLATES_DIR.absolute()}")
+logging.info(f"WAVs: {[f.name for f in AUDIO_DIR.glob('*.wav')]}")
 
 # FIXED: Explicit template_folder!
 app = Flask(__name__, template_folder=str(TEMPLATES_DIR))
@@ -69,7 +69,7 @@ BEAK_POSITIONS = {
 # ===== YOUR EXACT ROUTES =====
 @app.route("/")
 def index():
-    print("📄 Serving index.html from app/templates/")
+    logging.info("Serving index.html from app/templates/")
     return render_template("index.html")
 
 @app.route('/volume')
@@ -143,7 +143,7 @@ def find_audio_device():
         devices = sd.query_devices()
         for i, dev in enumerate(devices):
             if "hifiberry" in dev['name'].lower() or "pcm5102a" in dev['name'].lower():
-                print(f"✅ HifiBerry: {i} - {dev['name']}")
+                logging.info(f"HifiBerry: {i} - {dev['name']}")
                 return i
         return 0
     except:
@@ -158,7 +158,7 @@ def servo_set_position(position):
 def animate_beak():
     global beak_moving, audio_stream, mic_active
     beak_moving = True
-    print("🦜 Beak START")
+    logging.info("Beak START")
     try:
         silence_count = 0
         while audio_stream and audio_stream.active:
@@ -178,7 +178,7 @@ def animate_beak():
         time.sleep(0.1)
         servo_set_position('closed')
         beak_moving = False
-        print("🦜 Beak STOPPED")
+        logging.info("Beak STOPPED")
 
 def audio_callback(outdata, frames, time_info, status):
     try:
@@ -194,7 +194,7 @@ def init_audio():
     global audio_stream
     device_id = find_audio_device()
     try:
-        print(f"🎵 Audio stream on device {device_id}")
+        logging.info(f"Audio stream on device {device_id}")
         sd.default.device = device_id
         audio_stream = sd.OutputStream(
             device=device_id,
@@ -204,20 +204,20 @@ def init_audio():
             blocksize=1024
         )
         audio_stream.start()
-        print("✅ Audio ready!")
+        logging.info("Audio ready!")
         return True
     except Exception as e:
-        print(f"❌ Audio failed: {e}")
+        logging.info(f"Audio failed: {e}")
         return False
 
 def play_wav(filename):
     filepath = AUDIO_DIR / filename
     if not filepath.exists():
-        print(f"❌ Missing: {filepath}")
+        logging.info(f"Missing: {filepath}")
         return
 
     try:
-        print(f"🎵 Playing: {filename}")
+        logging.info(f"Playing: {filename}")
 
         # Always get 2D array: shape (frames, channels)
         data, fs = sf.read(str(filepath), always_2d=True)  # (N, C)
@@ -264,7 +264,7 @@ def play_wav(filename):
             threading.Thread(target=animate_beak, daemon=True).start()
 
     except Exception as e:
-        print(f"❌ Play error in play_wav({filename}): {e}")
+        logging.info(f"Play error in play_wav({filename}): {e}")
 
 
 # ===== SOCKET.IO =====
@@ -272,7 +272,7 @@ def play_wav(filename):
 def handle_mic_start(data):
     global mic_active
     mic_active = True
-    print("🎤 Mic ON")
+    logging.info("Mic ON")
     if not beak_moving:
         threading.Thread(target=animate_beak, daemon=True).start()
 
@@ -296,18 +296,55 @@ def handle_mic_chunk(data):
 def handle_mic_stop():
     global mic_active
     mic_active = False
-    print("🔇 Mic OFF")
+    logging.info("Mic OFF")
 
 def startup_test():
     time.sleep(2)
-    print("🦜 Startup...")
+    logging.info("Startup...")
     play_wav('squawk3.wav')
 
 if __name__ == '__main__':
     os.makedirs(AUDIO_DIR, exist_ok=True)
-    if not init_audio():
-        print("❌ Audio init failed!")
-        sys.exit(1)
-    threading.Thread(target=startup_test, daemon=True).start()
-    print("🌐 ParrotPi ready! http://0.0.0.0:5000")
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+    
+    try:
+        if not init_audio():
+            logging.info("Audio failed!")
+            sys.exit(1)
+        
+        # Your startup test here
+        startup_test()
+        
+        logging.info("ParrotPi ready! http://0.0.0.0:5000")
+        socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+        
+    except KeyboardInterrupt:
+        logging.info("\nShutting down...")
+    except Exception as e:
+        logging.info(f"Unexpected error: {e}")
+    finally:
+        # CRITICAL: RELEASE AUDIO CHIP
+        logging.info("🔊 Releasing audio device...")
+        try:
+            # Stop and close sounddevice stream
+            if 'audio_stream' in globals() and audio_stream:
+                audio_stream.stop()
+                audio_stream.close()
+                logging.info("sounddevice stream closed")
+            
+            # Kill any stuck ALSA processes
+            os.system("sudo fuser -k /dev/snd/* 2>/dev/null")
+            logging.info("ALSA processes killed")
+            
+            # Force ALSA reload
+            os.system("sudo alsa force-reload 2>/dev/null")
+            logging.info("ALSA reloaded")
+            
+            # GPIO cleanup
+            servo_pwm.stop()
+            GPIO.cleanup()
+            logging.info("GPIO cleaned")
+            
+        except Exception as e:
+            logging.info(f"Cleanup warning: {e}")
+        
+        logging.info("Audio chip fully released - ready for next start!")
