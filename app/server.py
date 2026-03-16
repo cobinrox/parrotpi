@@ -59,6 +59,9 @@ audio_stream = None
 mic_active = False
 beak_moving = False
 
+mic_record_buffer = []
+mic_recording = False
+
 # Beak servo positions
 BEAK_POSITIONS = {
     'closed': 2.5,
@@ -350,70 +353,110 @@ def play_wav(filename):
     except Exception as e:
         logging.info(f"Play error in play_wav({filename}): {e}")
 
+def save_mic_recording():
+    """Save mic buffer to test.wav with parrot pitch applied"""
+    global mic_record_buffer
+    
+    if not mic_record_buffer:
+        print("⚠️ No mic data to save")
+        return
+    
+    try:
+        print(f"💾 Saving {len(mic_record_buffer)} chunks to test.wav...")
+        
+        # Concatenate all chunks
+        full_audio = np.vstack(mic_record_buffer)
+        
+        # Apply parrot pitch resampling (same as play_wav)
+        parrot_factor = 1.0 + (parrot_pct / 100.0)
+        if parrot_factor != 1.0:
+            n_frames, n_channels = full_audio.shape
+            target_length = int(n_frames / parrot_factor)
+            
+            orig_t = np.linspace(0.0, 1.0, n_frames, endpoint=False)
+            new_t = np.linspace(0.0, 1.0, target_length, endpoint=False)
+            
+            new_audio = np.zeros((target_length, n_channels), dtype=np.float32)
+            for ch in range(n_channels):
+                new_audio[:, ch] = np.interp(new_t, orig_t, full_audio[:, ch])
+            full_audio = new_audio
+        
+        # Save to test.wav in audio directory
+        test_path = AUDIO_DIR / 'test.wav'
+        sf.write(str(test_path), full_audio, SAMPLE_RATE)
+        duration = len(full_audio) / SAMPLE_RATE
+        print(f"✅ Saved test.wav: {duration:.2f}s ({len(full_audio)} frames)")
+        
+    except Exception as e:
+        print(f"❌ Save error: {e}")
+
+
+
 
 # ===== SOCKET.IO =====
 @socketio.on('mic_start')
 def handle_mic_start(data):
-    global mic_active
+    global mic_active, mic_recording, mic_record_buffer
     mic_active = True
-    logging.info("Mic ON")
+    mic_recording = True
+    mic_record_buffer = []  # Clear previous recording
+    print("🎤 Mic ON + RECORDING to test.wav")
     if not beak_moving:
         threading.Thread(target=animate_beak, daemon=True).start()
 
+@socketio.on('mic_stop')
+def handle_mic_stop():
+    global mic_active, mic_recording
+    mic_active = False
+    mic_recording = False
+    print("🔇 Mic OFF")
+    # Save recorded audio IMMEDIATELY
+    save_mic_recording()
+	
 @socketio.on('mic_chunk')
 def handle_mic_chunk(data):
     if mic_active:
         try:
-            # Convert buffer → numpy
             audio_data = np.frombuffer(data, dtype=np.float32)
             if len(audio_data) == 0:
                 return
 
-            # **PARROT PITCH RESAMPLING** (same as play_wav)
+            # **PARROT PITCH RESAMPLING** (already implemented)
             parrot_factor = 1.0 + (parrot_pct / 100.0)
-            
-            if parrot_factor != 1.0 and len(audio_data) > 128:  # Skip tiny chunks
-                # Resample this chunk (faster = higher pitch)
+            if parrot_factor != 1.0 and len(audio_data) > 128:
                 orig_len = len(audio_data)
                 target_len = int(orig_len / parrot_factor)
-                
                 orig_t = np.linspace(0.0, 1.0, orig_len, endpoint=False)
                 new_t = np.linspace(0.0, 1.0, target_len, endpoint=False)
                 
-                # Handle mono input (browser sends mono)
                 if len(audio_data.shape) == 1:
-                    # Resample mono → duplicate to stereo
                     resampled_mono = np.interp(new_t, orig_t, audio_data)
                     audio_data = np.stack([resampled_mono, resampled_mono], axis=1)
                 else:
-                    # Stereo: resample each channel
                     audio_data = audio_data.reshape(-1, 2)
                     resampled_l = np.interp(new_t, orig_t[:len(audio_data)], audio_data[:, 0])
                     resampled_r = np.interp(new_t, orig_t[:len(audio_data)], audio_data[:, 1])
                     audio_data = np.stack([resampled_l, resampled_r], axis=1)
             
-            # Ensure stereo if no resampling
             elif len(audio_data.shape) == 1:
                 audio_data = np.stack([audio_data, audio_data], axis=1)
 
-            # Pad/truncate to exact 1024 frames
+            # **SAVE PROCESSED AUDIO** (with parrot pitch)
+            if mic_recording:
+                mic_record_buffer.append(audio_data.copy())
+
+            # Pad/truncate to 1024 frames and queue
             if len(audio_data) > 1024:
                 audio_data = audio_data[:1024]
             else:
                 pad_frames = 1024 - len(audio_data)
                 audio_data = np.pad(audio_data, ((0, pad_frames), (0, 0)))
 
-            # Queue for playback
             audio_queue.put(audio_data)
 
         except Exception as e:
-            logging.info(f"Mic chunk error: {e}")
-
-@socketio.on('mic_stop')
-def handle_mic_stop():
-    global mic_active
-    mic_active = False
-    logging.info("Mic OFF")
+            print(f"Mic chunk error: {e}")
+	
 
 def startup_test():
     time.sleep(2)
