@@ -171,7 +171,7 @@ def animate_beak():
             else:
                 silence_count += 1
                 time.sleep(0.1)
-                if silence_count > 50:
+                if silence_count > 10:
                     break
     finally:
         servo_pwm.ChangeDutyCycle(0)
@@ -217,10 +217,13 @@ def play_wav(filename):
         return
 
     try:
-        logging.info(f"Playing: {filename}")
-
         # Always get 2D array: shape (frames, channels)
         data, fs = sf.read(str(filepath), always_2d=True)  # (N, C)
+
+        # LOG DURATION HERE
+        duration = len(data) / fs
+        logging.info(f"Playing: {filename}  Duration: {duration:.2f}s ({len(data)} frames @ {fs}Hz)")
+
 
         # Parrot speed factor
         parrot_factor = 1.0 + (parrot_pct / 100.0)
@@ -307,6 +310,9 @@ if __name__ == '__main__':
     os.makedirs(AUDIO_DIR, exist_ok=True)
     
     try:
+        logging.info("Waiting 10 seconds before attempting audio...")
+        time.sleep(10)
+        logging.info("...now attempting audio")
         if not init_audio():
             logging.info("Audio failed!")
             sys.exit(1)
