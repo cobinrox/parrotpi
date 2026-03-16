@@ -139,12 +139,15 @@ def say():
 
 # ===== AUDIO ENGINE =====
 def find_audio_device():
+    """Enhanced device finder"""
     try:
         devices = sd.query_devices()
         for i, dev in enumerate(devices):
-            if "hifiberry" in dev['name'].lower() or "pcm5102a" in dev['name'].lower():
-                logging.info(f"HifiBerry: {i} - {dev['name']}")
+            name = dev['name'].lower()
+            if 'hifiberry' in name or 'pcm5102a' in name:
+                logging.info(f"✅ HifiBerry found: device {i}")
                 return i
+        logging.info("⚠️ No HifiBerry - using device 0")
         return 0
     except:
         return 0
@@ -189,26 +192,104 @@ def audio_callback(outdata, frames, time_info, status):
         audio_queue.task_done()
     except queue.Empty:
         outdata.fill(0)
+def check_alsa_device_status(device_id=0):
+    """Deep diagnostic - check if HifiBerry device is truly available"""
+    try:
+        logging.info(f" Probing device {device_id}...")
+        
+        # 1. Check if device exists in sounddevice
+        devices = sd.query_devices()
+        device_info = devices[device_id]
+        logging.info(f"   Device {device_id}: {device_info['name']}")
+        logging.info(f"   Channels: {device_info['max_output_channels']} out")
+        
+        if device_info['max_output_channels'] == 0:
+            logging.info("   NO OUTPUT CHANNELS!")
+            return False
+            
+        # 2. Check ALSA low-level state
+        import subprocess
+        result = subprocess.run(['cat', '/proc/asound/card0/pcm0p/sub0/status'], 
+                              capture_output=True, text=True)
+        logging.info(f"   ALSA status: {result.stdout.strip() or 'OK'}")
+        
+        # 3. Check if device is locked by processes
+        result = subprocess.run(['sudo', 'fuser', '/dev/snd/pcmC0D0p'], 
+                              capture_output=True, text=True)
+        if result.stdout.strip():
+            logging.info(f"   LOCKED by PIDs: {result.stdout.strip()}")
+            return False
+            
+        # 4. Test PortAudio settings
+        sd.check_output_settings(device=device_id, channels=2, samplerate=44100)
+        logging.info("   PortAudio settings OK")
+        return True
+        
+    except Exception as e:
+        logging.info(f"   Probe failed: {e}")
+        return False
+
+def force_alsa_reset():
+    """NUCLEAR OPTION - reset entire ALSA stack"""
+    logging.info("FORCE RESETTING ALSA...")
+    
+    cmds = [
+        "sudo fuser -k /dev/snd/* 2>/dev/null",  # Kill processes
+        "sudo alsa force-reload",                # Reload ALSA
+        "sudo amixer set 'Digital' 100%",        # HifiBerry volume
+        "sudo amixer set 'PCM' 100%",
+        "echo 'standby' | sudo tee /sys/class/sound/card0/device/power/control > /dev/null"
+    ]
+    
+    for cmd in cmds:
+        logging.info(f"   $ {cmd}")
+        os.system(cmd)
+        time.sleep(0.5)
+    
+    logging.info("ALSA reset complete!")
+
 
 def init_audio():
+    """ROBUST init with deep diagnostics + reset"""
     global audio_stream
+    
     device_id = find_audio_device()
-    try:
-        logging.info(f"Audio stream on device {device_id}")
-        sd.default.device = device_id
-        audio_stream = sd.OutputStream(
-            device=device_id,
-            channels=2,
-            samplerate=SAMPLE_RATE,
-            callback=audio_callback,
-            blocksize=1024
-        )
-        audio_stream.start()
-        logging.info("Audio ready!")
-        return True
-    except Exception as e:
-        logging.info(f"Audio failed: {e}")
-        return False
+    
+    # Aggressive reset first
+    force_alsa_reset()
+    time.sleep(1)
+    
+    for attempt in range(5):
+        logging.info(f"\nAudio init attempt {attempt + 1}/5 (device {device_id})")
+        
+        # DEEP PROBE
+        if not check_alsa_device_status(device_id):
+            logging.info("   Device probe failed - resetting...")
+            force_alsa_reset()
+            time.sleep(2)
+            continue
+        
+        try:
+            logging.info(f"Starting stream on device {device_id}...")
+            sd.default.device = device_id
+            audio_stream = sd.OutputStream(
+                device=device_id,
+                channels=2,
+                samplerate=SAMPLE_RATE,
+                callback=audio_callback,
+                blocksize=1024
+            )
+            audio_stream.start()
+            logging.info(f"STREAM ACTIVE on {device_id}!")
+            return True
+            
+        except Exception as e:
+            logging.info(f"Stream failed: {e}")
+            force_alsa_reset()
+            time.sleep(attempt + 1)
+    
+    logging.info("ALL AUDIO INIT FAILED")
+    return False
 
 def play_wav(filename):
     filepath = AUDIO_DIR / filename
@@ -279,21 +360,6 @@ def handle_mic_start(data):
     if not beak_moving:
         threading.Thread(target=animate_beak, daemon=True).start()
 
-# @socketio.on('mic_chunk')
-# def handle_mic_chunk(data):
-#     if mic_active:
-#         try:
-#             audio_data = np.frombuffer(data, dtype=np.float32)
-#             if len(audio_data) > 0:
-#                 if len(audio_data.shape) == 1:
-#                     audio_data = np.stack([audio_data, audio_data], axis=1)
-#                 if len(audio_data) > 1024:
-#                     audio_data = audio_data[:1024]
-#                 else:
-#                     audio_data = np.pad(audio_data, ((0, 1024-len(audio_data)), (0,0)))
-#                 audio_queue.put(audio_data)
-#         except:
-#             pass
 @socketio.on('mic_chunk')
 def handle_mic_chunk(data):
     if mic_active:
@@ -341,7 +407,7 @@ def handle_mic_chunk(data):
             audio_queue.put(audio_data)
 
         except Exception as e:
-            print(f"Mic chunk error: {e}")
+            logging.info(f"Mic chunk error: {e}")
 
 @socketio.on('mic_stop')
 def handle_mic_stop():
