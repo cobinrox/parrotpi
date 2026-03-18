@@ -25,7 +25,7 @@ logging.basicConfig(
 # Audio constants
 MAX_MIC_GAIN = 5.0
 VOLUME_STEPS = 10
-PARROT_MIN_PCT = 20
+PARROT_MIN_PCT = 5
 PARROT_MAX_PCT = 90
 
 # FIXED PATHS
@@ -52,7 +52,7 @@ servo_pwm.start(0)
 # Globals
 SAMPLE_RATE = 44100
 mic_gain = 1.0
-parrot_pct = 30
+parrot_pct = 20
 
 audio_queue = queue.Queue()
 audio_stream = None
@@ -326,23 +326,23 @@ def play_wav(filename):
         # Parrot speed factor
         parrot_factor = 1.0 + (parrot_pct / 100.0)
 
-        if parrot_factor != 1.0:
-            # Resample each channel independently
-            n_frames, n_channels = data.shape
-            target_length = int(n_frames / parrot_factor)
+        # if parrot_factor != 1.0:
+        #     # Resample each channel independently
+        #     n_frames, n_channels = data.shape
+        #     target_length = int(n_frames / parrot_factor)
 
-            # Time axes as 1D
-            orig_t = np.linspace(0.0, 1.0, n_frames, endpoint=False)
-            new_t = np.linspace(0.0, 1.0, target_length, endpoint=False)
+        #     # Time axes as 1D
+        #     orig_t = np.linspace(0.0, 1.0, n_frames, endpoint=False)
+        #     new_t = np.linspace(0.0, 1.0, target_length, endpoint=False)
 
-            new_data = np.zeros((target_length, n_channels), dtype=np.float32)
-            for ch in range(n_channels):
-                new_data[:, ch] = np.interp(new_t, orig_t, data[:, ch])
+        #     new_data = np.zeros((target_length, n_channels), dtype=np.float32)
+        #     for ch in range(n_channels):
+        #         new_data[:, ch] = np.interp(new_t, orig_t, data[:, ch])
 
-            data = new_data
-        else:
+        #     data = new_data
+        # else:
             # Just ensure float32 and 2D
-            data = data.astype(np.float32)
+        data = data.astype(np.float32)
 
         # Ensure stereo output (duplicate mono if needed)
         if data.shape[1] == 1:
