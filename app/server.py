@@ -25,8 +25,8 @@ logging.basicConfig(
 # Audio constants
 MAX_MIC_GAIN = 5.0
 VOLUME_STEPS = 10
-PARROT_MIN_PCT = 8
-PARROT_MAX_PCT = 20
+PARROT_MIN_PCT = 20
+PARROT_MAX_PCT = 90
 
 # FIXED PATHS
 BASE_DIR = Path(__file__).parent  # /home/u/projects/parrotpi/app
@@ -52,7 +52,7 @@ servo_pwm.start(0)
 # Globals
 SAMPLE_RATE = 44100
 mic_gain = 1.0
-parrot_pct = 8
+parrot_pct = 30
 
 audio_queue = queue.Queue()
 audio_stream = None
@@ -103,6 +103,7 @@ def set_volume(percent):
 
 @app.route('/parrot')
 def get_parrot():
+    global parrot_pct
     return jsonify({'parrot': parrot_pct})
 
 @app.route('/parrot/<int:percent>', methods=['POST'])
@@ -198,6 +199,7 @@ def animate_beak():
         logging.info("Beak STOPPED")
 
 def audio_callback(outdata, frames, time_info, status):
+    global parrot_pct
     try:
         data = audio_queue.get_nowait()
         parrot_factor = 1.0 + (parrot_pct / 100.0)
@@ -306,6 +308,7 @@ def init_audio():
     return False
 
 def play_wav(filename):
+    global parrot_pct
     filepath = AUDIO_DIR / filename
     if not filepath.exists():
         logging.info(f"Missing: {filepath}")
@@ -367,7 +370,7 @@ def play_wav(filename):
 def save_mic_recording():
     """Save mic buffer to test.wav with parrot pitch applied"""
     global mic_record_buffer
-    
+    global parrot_pct    
     if not mic_record_buffer:
         print("⚠️ No mic data to save")
         return
@@ -426,6 +429,7 @@ def handle_mic_stop():
 	
 @socketio.on('mic_chunk')
 def handle_mic_chunk(data):
+    global parrot_pct
     if mic_active:
         try:
             audio_data = np.frombuffer(data, dtype=np.float32)
