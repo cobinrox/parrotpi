@@ -53,6 +53,8 @@ servo_pwm.start(0)
 SAMPLE_RATE = 44100
 mic_gain = 1.0
 parrot_pct = 20
+BIRD = os.getenv("BIRD", "small")
+logging.info(f"ParrotPi starting with BIRD={BIRD}")
 
 audio_queue = queue.Queue()
 audio_stream = None
@@ -63,11 +65,18 @@ mic_record_buffer = []
 mic_recording = False
 
 # Beak servo positions
-BEAK_POSITIONS = {
-    'closed': 2.5,
-    'mid': 7.5,  
-    'open': 12.5
-}
+if BIRD == "big":
+    BEAK_POSITIONS = {
+        'closed': 2.5,
+        'mid': 7.5,
+        'open': 25.0
+    }
+else:
+    BEAK_POSITIONS = {
+        'closed': 2.5,
+        'mid': 7.5,
+        'open': 12.5
+    }
 
 # ===== YOUR EXACT ROUTES =====
 @app.route("/")
@@ -181,11 +190,18 @@ def find_audio_device():
     except:
         return 0
 
+_last_beak_duty = BEAK_POSITIONS['closed']
+
 def servo_set_position(position):
+    global _last_beak_duty
     duty = BEAK_POSITIONS.get(position, 7.5)
+    travel = abs(duty - _last_beak_duty)
+    # ~0.15s per 10 units of travel, minimum 0.15s
+    hold_time = max(0.15, travel / 10.0 * 0.15)
     servo_pwm.ChangeDutyCycle(duty)
-    time.sleep(0.15)
+    time.sleep(hold_time)
     servo_pwm.ChangeDutyCycle(0)
+    _last_beak_duty = duty
 
 def animate_beak():
     global beak_moving, audio_stream, mic_active
