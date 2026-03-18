@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ParrotPi 🦜</title>
+<title>ParrotPi v0.1 🦜</title>
 
 <style>
   /* Reset and body */
@@ -135,28 +135,15 @@
 <div id="parrot">
 </div>
 
-<!--  VOLUME BUTTONS  -->
-<div style="display:flex; gap:20px; margin-top:10px;">
-  <button onclick="volumeDown()"
-          style="padding:10px 18px; font-size:1rem; border-radius:8px; cursor:pointer;">
-    🔉 VOL –
-  </button>
-
-  <button onclick="volumeUp()"
-          style="padding:10px 18px; font-size:1rem; border-radius:8px; cursor:pointer;">
-    🔊 VOL +
-  </button>
-</div>
-
-<!-- STOP BUTTON — always enabled -->
-<button id="stopBtn" onclick="stopAll()">⛔ STOP</button>
-<div id="volumeContainer" style="width:220px; margin-top:10px;">
+<!-- VOLUME SLIDER -->
+<div style="margin-top:10px; width:220px;">
   <div style="font-size:0.8rem; color:#aaa; margin-bottom:4px;">volume</div>
-  <div id="volumeBarBg" style="width:100%; height:12px; background:#333; border-radius:6px;">
-    <div id="volumeBar" style="height:100%; width:0%; background:#4caf50; border-radius:6px;"></div>
+  <div style="display:flex; gap:10px; align-items:center;">
+    <input id="volumeSlider" type="range" min="0" max="100" value="50" step="5" style="flex:1;">
+    <span id="volumeValue" style="width:48px; text-align:right; font-size:0.85rem;">50%</span>
   </div>
 </div>
-<!--  END VOLUME BUTTONS  -->
+
 
 <div style="margin-top: 16px; width: 220px;">
   <div style="font-size:0.8rem; color:#aaa; margin-bottom:4px;">parrot pitch</div>
@@ -165,6 +152,8 @@
     <span id="parrotValue" style="width:48px; text-align:right; font-size:0.85rem;">+20%</span>
   </div>
 </div>
+<!-- STOP BUTTON — always enabled -->
+<button id="stopBtn" onclick="stopAll()">⛔ STOP</button>
 
 <button id="holdButton" class="ctrl-btn">HOLD TO<br>TALK</button>
 
@@ -300,6 +289,16 @@ holdButton.addEventListener("pointerup", () => {
       setParrot(pct);
     });
   }
+
+  const volumeSlider = document.getElementById("volumeSlider");
+  const volumeValue  = document.getElementById("volumeValue");
+  if (volumeSlider && volumeValue) {
+    volumeSlider.addEventListener("input", () => {
+      const vol = parseInt(volumeSlider.value);
+      volumeValue.textContent = vol + "%";
+      setVolume(vol);
+    });
+  }
 }
 
 async function refreshVolume() {
@@ -307,10 +306,21 @@ async function refreshVolume() {
     const res = await fetch('/volume');
     const data = await res.json();
     const vol = data.volume;
-    console.log("Current volume:", vol);
-    document.getElementById("volumeBar").style.width = vol + "%";
+    document.getElementById("volumeSlider").value = vol;
+    document.getElementById("volumeValue").textContent = vol + "%";
   } catch (err) {
     console.error("Failed to get volume:", err);
+  }
+}
+
+async function setVolume(percent) {
+  try {
+    const res = await fetch(`/volume/${percent}`, { method: 'POST' });
+    const data = await res.json();
+    document.getElementById("volumeSlider").value = data.volume;
+    document.getElementById("volumeValue").textContent = data.volume + "%";
+  } catch (err) {
+    console.error("Failed to set volume:", err);
   }
 }
 
@@ -338,27 +348,6 @@ async function setParrot(pct) {
   }
 }
 
-async function volumeUp() {
-  try {
-    const res = await fetch('/volUp', { method: 'POST' });
-    const data = await res.json();
-    console
-    document.getElementById("volumeBar").style.width = data.volume + "%";
-  } catch (err) {
-    console.error("volUp failed:", err);
-  }
-}
-
-async function volumeDown() {
-  try {
-    const res = await fetch('/volDown', { method: 'POST' });
-    const data = await res.json();
-    console
-    document.getElementById("volumeBar").style.width = data.volume + "%";
-  } catch (err) {
-    console.error("volDown failed:", err);
-  }
-}
 function sayPhrase(text) {
   console.log("Phrase:", text);
   fetch('/say', {

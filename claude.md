@@ -1,56 +1,14 @@
 # ParrotPi — Raspberry Pi Animatronic Controller
 
-ParrotPi is a Python‑based animatronic control system designed for the Raspberry Pi.  
-It drives servos and GPIO‑connected components, exposes a lightweight web API, and provides a simple UI for triggering movements and behaviors. The project emphasizes clarity, modularity, and hardware abstraction so it can be easily understood, modified, and extended.
+This is a python3 flask web server for a raspberry pi.  The web page
+sends REST calls to the server such as move beak open/close, increase/
+decrease volume, playback a phrase (previously recorded wav file), and
+provide a push-to-talk socketio microphone near-realtime stream to
+playback through the parrot.  All of the parrot noises also are played
+while the beak servo opens and closes while playing.  It also has a start
+up wav file that it plays upon start up to make sure that the sound card
+(MAX-98357A) was initialized properly and is working ok.
 
----
-
-## Project Overview
-
-ParrotPi turns a Raspberry Pi into a small animatronic controller capable of:
-
-- Driving multiple servos (beak, head, wings, etc.)
-- Running behaviors and animations via REST endpoints
-- Providing a web‑based control interface
-- Running automatically at boot as a systemd service
-- Logging activity to `/var/log/parrotpi` with log rotation
-- Running in **simulation mode** on non‑Pi hardware
-
-The system is intentionally simple and hackable, making it ideal for robotics, puppetry, cosplay animatronics, and educational builds.
-
----
-
-##  Architecture Summary (15‑Point Overview)
-
-### 1. **Purpose** 
-Control animatronic components via servos and GPIO, with a web API for remote triggering.
-### 2. **Hardware Platform** — 
-Raspberry Pi using its GPIO pins for PWM and digital I/O.
-### 3. **Language** — 
-Entirely written in Python 3.
-### 4. **GPIO Library** — 
-Uses `gpiozero` as the high‑level GPIO abstraction layer, with `RPi.GPIO` as the backend driver for real hardware control.
-
-
-### 6. **Pin Mapping** — 
-A central dictionary (`SERVO_PINS`) maps servo names (e.g.,`beak` ,`head` ) to GPIO pin numbers.
-This allows easy re‑wiring without changing logic.  The original pin usage is:
-```
-## Pin Setup
-```
-BEAK SERVO (see below for pin out map)
- Brown - Pin 6 (GND)
- Orange - Pin 2 or 4 (5V)
- Yellow - Pin 11 (GPIO 17)
-```
-
-### 8. **Web Server** — Flask app (`server.py`) exposes REST endpoints for servo control and behaviors.
-A lightweight Flask web server () exposes REST endpoints for:
-• 	moving servos
-• 	triggering behaviors
-• 	reading inputs
-• 	running animations
-The web UI communicates with these endpoints via AJAX/Fetch.
 
 ### 9. **Directory Structure** —
 ```
