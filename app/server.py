@@ -69,13 +69,15 @@ if BIRD == "big":
     BEAK_POSITIONS = {
         'closed': 2.5,
         'mid': 7.5,
-        'open': 25.0
+        'open': 25.0,
+        'anim': 12.5,   # smaller travel for faster talking animation
     }
 else:
     BEAK_POSITIONS = {
         'closed': 2.5,
         'mid': 7.5,
-        'open': 12.5
+        'open': 12.5,
+        'anim': 12.5,
     }
 
 # ===== YOUR EXACT ROUTES =====
@@ -209,10 +211,15 @@ def animate_beak():
     logging.info("Beak START")
     try:
         silence_count = 0
+        first_move = True
         while audio_stream and audio_stream.active:
             if mic_active or not audio_queue.empty():
                 silence_count = 0
-                servo_set_position('open')
+                if first_move and BIRD == "big":
+                    servo_set_position('open')
+                    first_move = False
+                else:
+                    servo_set_position('anim')
                 time.sleep(0.08)
                 servo_set_position('closed')
                 time.sleep(0.08)
@@ -224,6 +231,9 @@ def animate_beak():
     finally:
         servo_pwm.ChangeDutyCycle(0)
         time.sleep(0.1)
+        # Force full hold time by pretending we're coming from max open
+        global _last_beak_duty
+        _last_beak_duty = BEAK_POSITIONS['open']
         servo_set_position('closed')
         beak_moving = False
         logging.info("Beak STOPPED")
