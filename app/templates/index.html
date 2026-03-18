@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ParrotPi</title>
+<title>ParrotPi 🦜</title>
 
 <style>
   /* Reset and body */
@@ -101,7 +101,6 @@
 
 <h1>🦜 ParrotPi</h1>
 <div id="statusLine" style="font-size:1rem; color:#aaa; margin-top:6px;">Status: initialising…</div>
-
 <div id="parrot">
 </div>
 
@@ -241,11 +240,16 @@ function initUI() {
   const parrotSlider = document.getElementById("parrotSlider");
   const parrotValue = document.getElementById("parrotValue");
 
-  if (holdButton) {
-    holdButton.addEventListener("mousedown", () => { holdButton.classList.add("active"); startMic(); });
-    holdButton.addEventListener("mouseup",   () => { holdButton.classList.remove("active"); stopMic(); });
-    holdButton.addEventListener("mouseleave",() => { holdButton.classList.remove("active"); stopMic(); });
-  }
+holdButton.addEventListener("pointerdown", () => {
+    holdButton.setPointerCapture(event.pointerId);
+    holdButton.classList.add("active");
+    startMic();
+});
+
+holdButton.addEventListener("pointerup", () => {
+    holdButton.classList.remove("active");
+    stopMic();
+});
 
   if (micGainSlider && micGainValue) {
     micGainSlider.addEventListener("input", () => {
@@ -375,7 +379,6 @@ async function refreshHardwareStatus() {
     setHardwareStatus(true, "error");
   }
 }
-
 // Initialize UI and load current settings on page startup
 window.addEventListener("load", () => {
   initUI();

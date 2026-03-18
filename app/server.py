@@ -434,22 +434,30 @@ def handle_mic_chunk(data):
 
             # **PARROT PITCH RESAMPLING** (already implemented)
             parrot_factor = 1.0 + (parrot_pct / 100.0)
+            logging.info("Parrot factor: {:.2f} ({}%)".format(parrot_factor, parrot_pct))
             if parrot_factor != 1.0 and len(audio_data) > 128:
                 orig_len = len(audio_data)
                 target_len = int(orig_len / parrot_factor)
+                logging.info(f"Resampling mic chunk: original {len(audio_data)} frames, target_len {target_len}")
+
                 orig_t = np.linspace(0.0, 1.0, orig_len, endpoint=False)
+                logging.info(f"Original time axis: {orig_t[:5]} ... {orig_t[-5:]}")
                 new_t = np.linspace(0.0, 1.0, target_len, endpoint=False)
+                logging.info(f"New time axis: {new_t[:5]} ... {new_t[-5:]}")
                 
                 if len(audio_data.shape) == 1:
+                    logging.info("Mic chunk is mono - duplicating channels")
                     resampled_mono = np.interp(new_t, orig_t, audio_data)
                     audio_data = np.stack([resampled_mono, resampled_mono], axis=1)
                 else:
+                    logging.info(f"Mic chunk is stereo - resampling each channel independently")
                     audio_data = audio_data.reshape(-1, 2)
                     resampled_l = np.interp(new_t, orig_t[:len(audio_data)], audio_data[:, 0])
                     resampled_r = np.interp(new_t, orig_t[:len(audio_data)], audio_data[:, 1])
                     audio_data = np.stack([resampled_l, resampled_r], axis=1)
             
             elif len(audio_data.shape) == 1:
+                logging.info("Audio data.shape mono 1")
                 audio_data = np.stack([audio_data, audio_data], axis=1)
 
             # **SAVE PROCESSED AUDIO** (with parrot pitch)
@@ -478,8 +486,8 @@ if __name__ == '__main__':
     os.makedirs(AUDIO_DIR, exist_ok=True)
     
     try:
-        logging.info("Waiting 10 seconds before attempting audio...")
-        time.sleep(10)
+        logging.info("Waiting a few seconds before attempting audio...")
+        time.sleep(5)
         logging.info("...now attempting audio")
         if not init_audio():
             logging.info("Audio failed!")
