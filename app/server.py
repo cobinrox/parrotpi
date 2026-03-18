@@ -140,7 +140,18 @@ def say():
     play_wav(filename)
     return jsonify({"status": "played", "file": filename})
 
+@app.route("/hardware_status")
+def hardware_status():
+    busy = mic_active or beak_moving or not audio_queue.empty()
+    return jsonify({
+        "busy": busy,
+        "mic_active": mic_active,
+        "beak_moving": beak_moving,
+        "queue_size": audio_queue.qsize(),
+    })
+
 # ===== AUDIO ENGINE =====
+
 def find_audio_device():
     """Enhanced device finder"""
     try:
@@ -148,9 +159,9 @@ def find_audio_device():
         for i, dev in enumerate(devices):
             name = dev['name'].lower()
             if 'hifiberry' in name or 'pcm5102a' in name:
-                logging.info(f"✅ HifiBerry found: device {i}")
+                logging.info(f"HifiBerry found: device {i}")
                 return i
-        logging.info("⚠️ No HifiBerry - using device 0")
+        logging.info("No HifiBerry - using device 0")
         return 0
     except:
         return 0

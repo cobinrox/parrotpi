@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ParrotPi 🦜</title>
+<title>ParrotPi</title>
 
 <style>
   /* Reset and body */
@@ -100,6 +100,7 @@
 <body>
 
 <h1>🦜 ParrotPi</h1>
+<div id="statusLine" style="font-size:1rem; color:#aaa; margin-top:6px;">Status: initialising…</div>
 
 <div id="parrot">
 </div>
@@ -348,11 +349,40 @@ function beakMid() {
 function beakOpen() {
   fetch('/servo/beak/open', { method: "POST" });
 }
+function setHardwareStatus(busy, reason) {
+  const statusLine = document.getElementById("statusLine");
+  if (!statusLine) return;
+  const statusText = busy ? `Busy (${reason})` : "Ready";
+  statusLine.textContent = `Status: ${statusText}`;
+  document.title = `ParrotPi: ${statusText}`;
+}
+
+async function refreshHardwareStatus() {
+  try {
+    const res = await fetch('/hardware_status');
+    const data = await res.json();
+    const busy = data.busy;
+    let reason = "idle";
+    if (busy) {
+      if (data.mic_active) reason = "mic";
+      else if (data.beak_moving) reason = "beak";
+      else if (data.queue_size > 0) reason = "audio";
+      else reason = "busy";
+    }
+    setHardwareStatus(busy, reason);
+  } catch (err) {
+    console.error("hardware status fetch failed:", err);
+    setHardwareStatus(true, "error");
+  }
+}
+
 // Initialize UI and load current settings on page startup
 window.addEventListener("load", () => {
   initUI();
   refreshVolume();
   refreshParrot();
+  refreshHardwareStatus();
+  setInterval(refreshHardwareStatus, 5000);
 });
 
 </script>
