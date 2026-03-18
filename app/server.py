@@ -209,82 +209,62 @@ def audio_callback(outdata, frames, time_info, status):
     except queue.Empty:
         outdata.fill(0)
 def check_alsa_device_status(device_id=0):
-    """Deep diagnostic - check if HifiBerry device is truly available"""
+    """Check that sounddevice can see the audio device and it has output channels."""
     try:
         logging.info(f" Probing device {device_id}...")
-        
-        # 1. Check if device exists in sounddevice
         devices = sd.query_devices()
+        if len(devices) == 0:
+            logging.info("   No audio devices found (PortAudio sees nothing)")
+            return False
+        if device_id >= len(devices):
+            logging.info(f"   Device {device_id} out of range (only {len(devices)} devices)")
+            return False
         device_info = devices[device_id]
         logging.info(f"   Device {device_id}: {device_info['name']}")
         logging.info(f"   Channels: {device_info['max_output_channels']} out")
-        
         if device_info['max_output_channels'] == 0:
             logging.info("   NO OUTPUT CHANNELS!")
             return False
-            
-        # 2. Check ALSA low-level state
-        import subprocess
-        result = subprocess.run(['cat', '/proc/asound/card0/pcm0p/sub0/status'], 
-                              capture_output=True, text=True)
-        logging.info(f"   ALSA status: {result.stdout.strip() or 'OK'}")
-        
-        # 3. Check if device is locked by processes
-        result = subprocess.run(['sudo', 'fuser', '/dev/snd/pcmC0D0p'], 
-                              capture_output=True, text=True)
-        if result.stdout.strip():
-            logging.info(f"   LOCKED by PIDs: {result.stdout.strip()}")
-            return False
-            
-        # 4. Test PortAudio settings
-        sd.check_output_settings(device=device_id, channels=2, samplerate=44100)
-        logging.info("   PortAudio settings OK")
         return True
-        
     except Exception as e:
         logging.info(f"   Probe failed: {e}")
         return False
 
 def force_alsa_reset():
-    """NUCLEAR OPTION - reset entire ALSA stack"""
-    logging.info("FORCE RESETTING ALSA...")
-    
-    cmds = [
-        "sudo fuser -k /dev/snd/* 2>/dev/null",  # Kill processes
-        "sudo alsa force-reload",                # Reload ALSA
-        "sudo amixer set 'Digital' 100%",        # HifiBerry volume
-        "sudo amixer set 'PCM' 100%",
-        "echo 'standby' | sudo tee /sys/class/sound/card0/device/power/control > /dev/null"
-    ]
-    
-    for cmd in cmds:
-        logging.info(f"   $ {cmd}")
-        os.system(cmd)
-        time.sleep(0.5)
-    
-    logging.info("ALSA reset complete!")
+    """Kill any process holding the audio device, then reinitialize PortAudio.
+    After fuser -k the HifiBerry briefly disappears from ALSA, so we poll
+    until PortAudio sees at least one device (up to 5 s) before returning."""
+    logging.info("Resetting audio (freeing ALSA locks + reinit PortAudio)...")
+    os.system("sudo fuser -k /dev/snd/* 2>/dev/null")
+    for i in range(5):
+        time.sleep(1)
+        try:
+            sd._terminate()
+            sd._initialize()
+            if len(sd.query_devices()) > 0:
+                logging.info(f"  Audio devices visible after {i + 1}s")
+                break
+        except Exception as e:
+            logging.info(f"  PortAudio reinit attempt {i + 1} warning: {e}")
+    logging.info("Audio reset complete.")
 
 
 def init_audio():
-    """ROBUST init with deep diagnostics + reset"""
+    """Initialize the sounddevice output stream for the HifiBerry DAC."""
     global audio_stream
-    
-    device_id = find_audio_device()
-    
-    # Aggressive reset first
-    force_alsa_reset()
-    time.sleep(1)
-    
+
     for attempt in range(5):
-        logging.info(f"\nAudio init attempt {attempt + 1}/5 (device {device_id})")
-        
-        # DEEP PROBE
+        logging.info(f"\nAudio init attempt {attempt + 1}/5")
+
+        # Free any process holding the device and refresh PortAudio's device list
+        force_alsa_reset()
+
+        device_id = find_audio_device()
+
         if not check_alsa_device_status(device_id):
-            logging.info("   Device probe failed - resetting...")
-            force_alsa_reset()
-            time.sleep(2)
+            logging.info("   Device not ready, retrying...")
             continue
-        
+
         try:
             logging.info(f"Starting stream on device {device_id}...")
             sd.default.device = device_id
@@ -296,14 +276,12 @@ def init_audio():
                 blocksize=1024
             )
             audio_stream.start()
-            logging.info(f"STREAM ACTIVE on {device_id}!")
+            logging.info(f"STREAM ACTIVE on device {device_id}!")
             return True
-            
+
         except Exception as e:
             logging.info(f"Stream failed: {e}")
-            force_alsa_reset()
-            time.sleep(attempt + 1)
-    
+
     logging.info("ALL AUDIO INIT FAILED")
     return False
 

@@ -30,11 +30,6 @@ Raspberry Pi using its GPIO pins for PWM and digital I/O.
 Entirely written in Python 3.
 ### 4. **GPIO Library** — 
 Uses `gpiozero` as the high‑level GPIO abstraction layer, with `RPi.GPIO` as the backend driver for real hardware control.
-### 5. **Servo Abstraction** — 
-The project defines two servo classes:
-- RealServo — wraps gpiozero’s Servo for actual hardware
-- SimServo — a no‑hardware simulation class for development on non‑Pi machines
-A factory chooses the correct implementation at runtime.
 
 
 ### 6. **Pin Mapping** — 
@@ -48,12 +43,6 @@ BEAK SERVO (see below for pin out map)
  Orange - Pin 2 or 4 (5V)
  Yellow - Pin 11 (GPIO 17)
 ```
-### 7. **Simulator Mode** — 
-The system can run in simulation mode when:
-• 	running on a non‑Pi machine
-• 	GPIO backend is unavailable
-• 	developer explicitly enables simulation
-This prevents crashes and allows UI development anywhere.
 
 ### 8. **Web Server** — Flask app (`server.py`) exposes REST endpoints for servo control and behaviors.
 A lightweight Flask web server () exposes REST endpoints for:
@@ -78,13 +67,7 @@ parrotpi/
   templates/
   install_as_service.sh
 ``` 
-### 10. **REST API** — 
-Source code is annotated for a flask swagger page.  Endpoints include:
-```
-POST /servo/<name>/set_angle
-POST /servo/<name>/move
-POST /behavior/<name>
-```
+
 ### 11. **Logging** — 
 When run as a service, writes to `/var/log/parrotpi/server.log` with logrotate support.
 
