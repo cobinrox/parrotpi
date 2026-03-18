@@ -151,6 +151,20 @@ def hardware_status():
         "queue_size": audio_queue.qsize(),
     })
 
+@app.route("/stop", methods=["POST"])
+def stop_all():
+    """Emergency stop: kills mic, drains audio queue, beak thread self-stops."""
+    global mic_active, mic_recording
+    mic_active = False
+    mic_recording = False
+    while not audio_queue.empty():
+        try:
+            audio_queue.get_nowait()
+        except Exception:
+            break
+    logging.info("STOP: mic killed, audio queue drained")
+    return jsonify({"status": "stopped"})
+
 # ===== AUDIO ENGINE =====
 
 def find_audio_device():
