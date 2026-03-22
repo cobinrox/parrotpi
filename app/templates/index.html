@@ -110,6 +110,22 @@
   pointer-events: none;
 }
 
+#micRequestBtn {
+  padding: 12px 24px;
+  font-size: 1rem;
+  font-weight: bold;
+  border-radius: 10px;
+  cursor: pointer;
+  background: #7c4d00;
+  color: #fff;
+  border: 2px solid #f4c542;
+  letter-spacing: 1px;
+  transition: background 0.15s, border-color 0.15s;
+}
+#micRequestBtn:hover  { background: #a06000; }
+#micRequestBtn.granted { background: #1b5e20; border-color: #4caf50; cursor: default; }
+#micRequestBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
 /* STOP button — always red, never locked */
 #stopBtn {
   padding: 14px 28px;
@@ -155,7 +171,8 @@
 <!-- STOP BUTTON — always enabled -->
 <button id="stopBtn" onclick="stopAll()">⛔ STOP</button>
 
-<button id="holdButton" class="ctrl-btn">HOLD TO<br>TALK</button>
+<button id="micRequestBtn" onclick="requestMic()">🎤 Enable Mic</button>
+<button id="holdButton" class="ctrl-btn" disabled>HOLD TO<br>TALK</button>
 
 <div class="meter-wrap" id="meterWrap">
   <div id="vuMeter"><div id="vuBar"></div></div>
@@ -207,7 +224,32 @@ audioContext.audioWorklet.addModule("{{ url_for('static', filename='pcm-worklet.
 
 let micStream;
 let micProcessor;
+let micReady = false;
+let hardwareBusy = false;
+let micActive = false;
 let holdButton = document.getElementById("holdButton");
+
+async function requestMic() {
+  const btn = document.getElementById("micRequestBtn");
+  btn.disabled = true;
+  btn.textContent = "Requesting…";
+  // Resume AudioContext synchronously here while we're still inside the user gesture.
+  // iOS Safari suspends AudioContext created outside a gesture and won't resume it
+  // reliably once we cross an await boundary.
+  audioContext.resume();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(t => t.stop()); // just needed the permission grant
+    micReady = true;
+    btn.textContent = "🎤 Mic Ready ✓";
+    btn.classList.add("granted");
+    holdButton.disabled = hardwareBusy; // enable hold-to-talk (unless parrot is busy)
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "🎤 Enable Mic (retry)";
+    console.error("Mic permission denied:", err);
+  }
+}
 let beak = document.getElementById("beak");
 let meterWrap = document.getElementById("meterWrap");
 
@@ -221,7 +263,10 @@ function computeRMS(buffer) {
 // Mic Capture & Streaming
 async function startMic() {
   console.log("told to mic_start")
-  await audioContext.resume();
+  // audioContext.resume() was already called synchronously in the pointerdown handler;
+  // this is just a safety fallback for non-iOS browsers.
+  audioContext.resume();
+  try {
   if (!micStream) {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const source = audioContext.createMediaStreamSource(micStream);
@@ -230,8 +275,8 @@ async function startMic() {
     micProcessor.connect(audioContext.destination);
 
     micProcessor.onaudioprocess = (e) => {
+        if (!micActive) return; // mic was stopped; ignore stale callbacks
         const input = e.inputBuffer.getChannelData(0);
-        //socket.emit("mic_chunk", { audio: input.slice() });
         console.log("emitting mic_chunk with length:", input.length);
         socket.emit("mic_chunk", input.slice().buffer);
         const amp = computeRMS(input);
@@ -242,18 +287,28 @@ async function startMic() {
         document.getElementById("vuBar").style.width = Math.min(amp*400,100)+'%';
     };
   }
+  micActive = true;
   console.log("emitting mic_start")
   socket.emit("mic_start", { sampleRate: audioContext.sampleRate });
+  } catch (err) {
+    console.error("startMic failed:", err);
+    holdButton.classList.remove("active");
+    holdButton.style.background = "";
+  }
 }
 
 function stopMic() {
-    console.log( "told to stopMic")
+    if (!micActive) return;
+    micActive = false;
+    console.log("told to stopMic")
     console.log("emitting mic_stop")
     socket.emit("mic_stop");
     if (micProcessor) micProcessor.disconnect();
     if (micStream) { micStream.getTracks().forEach(track => track.stop()); micStream = null; }
+    holdButton.classList.remove("active");
     holdButton.style.background = `radial-gradient(circle at 40% 35%, #4caf50, #1b5e20)`;
     meterWrap.classList.remove("visible");
+    document.getElementById("vuBar").style.width = "0%";
 }
 
 function initUI() {
@@ -263,13 +318,19 @@ function initUI() {
   const parrotSlider = document.getElementById("parrotSlider");
   const parrotValue = document.getElementById("parrotValue");
 
-holdButton.addEventListener("pointerdown", () => {
-    holdButton.setPointerCapture(event.pointerId);
+holdButton.addEventListener("pointerdown", (e) => {
+    holdButton.setPointerCapture(e.pointerId);
+    audioContext.resume(); // synchronous within gesture — required for iOS Safari
     holdButton.classList.add("active");
     startMic();
 });
 
 holdButton.addEventListener("pointerup", () => {
+    holdButton.classList.remove("active");
+    stopMic();
+});
+
+holdButton.addEventListener("pointercancel", () => {
     holdButton.classList.remove("active");
     stopMic();
 });
@@ -377,6 +438,7 @@ function beakOpen() {
   fetch('/servo/beak/open', { method: "POST" });
 }
 function setHardwareStatus(busy, reason) {
+  hardwareBusy = busy;
   const statusLine = document.getElementById("statusLine");
   if (statusLine) {
     const statusText = busy ? `Busy (${reason})` : "Ready";
@@ -384,8 +446,15 @@ function setHardwareStatus(busy, reason) {
     document.title = `ParrotPi: ${statusText}`;
   }
   // Lock or unlock all ctrl-btn elements (STOP button is excluded — no ctrl-btn class)
+  // holdButton also requires mic permission before it can be enabled.
+  // Never disable holdButton while mic is active — iOS Safari won't fire pointerup on a disabled element,
+  // which would leave the mic running forever.
   document.querySelectorAll(".ctrl-btn").forEach(btn => {
-    btn.disabled = busy;
+    if (btn.id === "holdButton") {
+      btn.disabled = (busy || !micReady) && !micActive;
+    } else {
+      btn.disabled = busy;
+    }
   });
 }
 

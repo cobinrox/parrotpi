@@ -1,6 +1,6 @@
 # ParrotPi — Raspberry Pi Animatronic Controller
 
-This is a python3 flask web server for a raspberry pi.  The web page
+This is a python3 flask web server for a raspberry pi-controlled anamatronic toy parrot.  The web page
 sends REST calls to the server such as move beak open/close, increase/
 decrease volume, playback a phrase (previously recorded wav file), and
 provide a push-to-talk socketio microphone near-realtime stream to
