@@ -166,7 +166,7 @@
   <span id="parrotValue" style="width:36px; text-align:right; font-size:0.85rem;">+20%</span>
 </div>
 <!-- STOP BUTTON — always enabled -->
-<button id="stopBtn" onclick="stopAll()">⛔ STOP</button>
+<button id="stopBtn" onclick="stopAll()">⛔ EMERGENCY STOP!</button>
 
 <button id="micRequestBtn" onclick="requestMic()">🎤 Enable Mic</button>
 <button id="holdButton" class="ctrl-btn" disabled>HOLD TO<br>TALK (*)</button>
@@ -191,6 +191,16 @@
   <button onclick="beakClose()" class="quickBtn ctrl-btn">Beak Close</button>
   <button onclick="beakOpen()" class="quickBtn ctrl-btn">Beak Open</button>
   <button onclick="headRight()" class="quickBtn ctrl-btn">head »</button>
+</div>
+
+<!-- RESTART BUTTON -->
+<div style="margin-top:24px; border-top:1px solid #333; padding-top:16px; width:100%; display:flex; justify-content:center;">
+  <button id="restartBtn" onclick="restartServer()"
+    style="padding:10px 22px; font-size:0.85rem; font-weight:bold; border-radius:8px;
+           cursor:pointer; background:#4a0000; color:#ff8a80; border:1px solid #c62828;
+           letter-spacing:1px; transition:background 0.15s;">
+    ⟳ Restart ParrotPi
+  </button>
 </div>
 
 <!-- Socket.IO -->
@@ -470,6 +480,24 @@ async function refreshHardwareStatus() {
   } catch (err) {
     console.error("hardware status fetch failed:", err);
   }
+}
+
+async function restartServer() {
+  if (!confirm("Restart the ParrotPi server?")) return;
+  const btn = document.getElementById("restartBtn");
+  btn.textContent = "Restarting…";
+  btn.disabled = true;
+  try {
+    await fetch('/restart', { method: 'POST' });
+  } catch (_) {}
+  // Poll until the server comes back, then reload the page
+  const poll = setInterval(async () => {
+    try {
+      await fetch('/');
+      clearInterval(poll);
+      window.location.reload();
+    } catch (_) {}
+  }, 1500);
 }
 
 async function stopAll() {

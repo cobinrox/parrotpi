@@ -13,6 +13,7 @@ import time
 import os
 import queue
 import sys
+import signal
 from pathlib import Path
 
 # Setup logging
@@ -161,6 +162,17 @@ def hardware_status():
         "beak_moving": beak_moving,
         "queue_size": audio_queue.qsize(),
     })
+
+@app.route("/restart", methods=["POST"])
+def restart_server():
+    """Send SIGTERM to self after a short delay so the response reaches the browser first.
+    Systemd (Restart=always) will relaunch the process with the same EnvironmentFile."""
+    def _do_restart():
+        time.sleep(1.5)
+        logging.info("Restarting via SIGTERM (systemd will relaunch)...")
+        os.kill(os.getpid(), signal.SIGTERM)
+    threading.Thread(target=_do_restart, daemon=True).start()
+    return jsonify({"status": "restarting"})
 
 @app.route("/stop", methods=["POST"])
 def stop_all():

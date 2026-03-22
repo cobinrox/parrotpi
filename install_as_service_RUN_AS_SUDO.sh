@@ -30,7 +30,7 @@ echo "Project directory: $PROJECT_DIR"
 echo "Python interpreter: $PYTHON_BIN"
 echo "Log file: $LOG_FILE"
 echo "Env file: /etc/parrotpi.env"
-cp parrotpi.env /etc/parrotpi.env
+cp parrotpi_small.env /etc/parrotpi.env
 
 # ---- sanity checks ----
 if [ ! -f "$PYTHON_BIN" ]; then

@@ -1,13 +1,24 @@
 # ParrotPi — Raspberry Pi Animatronic Controller
 
-This is a python3 flask web server for a raspberry pi-controlled anamatronic toy parrot.  The web page
+This is a python3 flask web server for a raspberry pi-controlled anamatronic toy parrot.  It serves a web page which 
 sends REST calls to the server such as move beak open/close, increase/
 decrease volume, playback a phrase (previously recorded wav file), and
 provide a push-to-talk socketio microphone near-realtime stream to
-playback through the parrot.  All of the parrot noises also are played
-while the beak servo opens and closes while playing.  It also has a start
+playback through the parrot.  When the parrot noises are played,
+the beak servo opens and closes while playing.  It also has a start
 up wav file that it plays upon start up to make sure that the sound card
 (MAX-98357A) was initialized properly and is working ok.
+
+## Features
+- Every several seconds the web pages asks the server for a "busy" status which tells the web page if someone else is using the parrot.  The web page will disable its buttons if it is busy.
+- There is a volume and pitch control on the web page that allows the user to change the volume and pitch of the parrot voice.
+- There is an emergency STOP button on the web page that can be used if the state of the server and page gets out of whack.
+- There is also a Restart button on the web page that allows a user to restart the server itself-- again for emergencies.
+- There is a Request/Allow Mic Access button on the web page that requests access to the microphone (either on a PC or phone).  Once the user acknowledges/allows access, then the allow state is set to true and the Hold to Talk button enables.
+- When the Hold to Talk button is pressed, it will stream the users voice over socketio to the server which will play back the voice in near-real time to the speaker of the pi.  It will also apply a pitch and volume based on those slider values on the web page.
+- There are several pre-recorded WAV files that the user of the web page can use to play back phrases and the "Replay" button plays back the last recorded phrase when a user had clicked the Hold to Talk button.
+- There are also a few beak open/close buttons that tell the server to open/close the parrot's beak
+- Again, remember, though, that the buttons are enabled when the parrot server has returned a not-busy poll.
 
 
 ### 9. **Directory Structure** —
@@ -20,9 +31,11 @@ parrotpi/
     sim_servo.py
     real_servo.py
     config.py
-  venv/
-  static/
-  templates/
+    static/
+      audio/
+       various WAV files
+    templates/
+       index.html
   install_as_service.sh
 ``` 
 
