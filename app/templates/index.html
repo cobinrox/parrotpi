@@ -126,22 +126,6 @@
 #micRequestBtn.granted { background: #1b5e20; border-color: #4caf50; cursor: default; }
 #micRequestBtn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-/* STOP button — always red, never locked */
-#stopBtn {
-  padding: 14px 28px;
-  font-size: 1.1rem;
-  font-weight: bold;
-  border-radius: 10px;
-  cursor: pointer;
-  background: #c62828;
-  color: #fff;
-  border: 2px solid #ff5252;
-  letter-spacing: 1px;
-  box-shadow: 0 0 14px #c6282866;
-  transition: background 0.15s, box-shadow 0.15s;
-}
-#stopBtn:hover  { background: #e53935; box-shadow: 0 0 22px #ef535088; }
-#stopBtn:active { background: #b71c1c; }
 </style>
 </head>
 <body>
@@ -165,9 +149,6 @@
   <input id="parrotSlider" type="range" min="5" max="90" value="20" step="5" style="flex:1;">
   <span id="parrotValue" style="width:36px; text-align:right; font-size:0.85rem;">+20%</span>
 </div>
-<!-- STOP BUTTON — always enabled -->
-<button id="stopBtn" onclick="stopAll()">⛔ EMERGENCY STOP!</button>
-
 <button id="micRequestBtn" onclick="requestMic()">🎤 Enable Mic</button>
 <button id="holdButton" class="ctrl-btn" disabled>HOLD TO<br>TALK (*)</button>
 
@@ -193,13 +174,25 @@
   <button onclick="headRight()" class="quickBtn ctrl-btn">head »</button>
 </div>
 
-<!-- RESTART BUTTON -->
-<div style="margin-top:24px; border-top:1px solid #333; padding-top:16px; width:100%; display:flex; justify-content:center;">
+<!-- STOP / RESTART / SHUTDOWN BUTTONS -->
+<div style="margin-top:24px; border-top:1px solid #333; padding-top:16px; width:100%; display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
+  <button id="stopBtn" onclick="stopAll()"
+    style="padding:10px 22px; font-size:0.85rem; font-weight:bold; border-radius:8px;
+           cursor:pointer; background:#c62828; color:#fff; border:2px solid #ff5252;
+           letter-spacing:1px; box-shadow:0 0 14px #c6282866; transition:background 0.15s;">
+    ⛔ Stop
+  </button>
   <button id="restartBtn" onclick="restartServer()"
     style="padding:10px 22px; font-size:0.85rem; font-weight:bold; border-radius:8px;
            cursor:pointer; background:#4a0000; color:#ff8a80; border:1px solid #c62828;
            letter-spacing:1px; transition:background 0.15s;">
-    ⟳ Restart ParrotPi
+    ⟳ Restart
+  </button>
+  <button id="shutdownBtn" onclick="shutdownPi()"
+    style="padding:10px 22px; font-size:0.85rem; font-weight:bold; border-radius:8px;
+           cursor:pointer; background:#7b1fa2; color:#fff; border:2px solid #ce93d8;
+           letter-spacing:1px; box-shadow:0 0 10px #7b1fa266; transition:background 0.15s;">
+    ⏻ Shutdown
   </button>
 </div>
 
@@ -480,6 +473,17 @@ async function refreshHardwareStatus() {
   } catch (err) {
     console.error("hardware status fetch failed:", err);
   }
+}
+
+async function shutdownPi() {
+  if (!confirm("Shut down the Raspberry Pi?\nYou will need physical access to turn it back on.")) return;
+  const btn = document.getElementById("shutdownBtn");
+  btn.textContent = "Shutting down…";
+  btn.disabled = true;
+  try {
+    await fetch('/shutdown', { method: 'POST' });
+  } catch (_) {}
+  document.getElementById("statusLine").textContent = "Status: Pi shutting down…";
 }
 
 async function restartServer() {

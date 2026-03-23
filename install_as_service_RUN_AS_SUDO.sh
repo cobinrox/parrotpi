@@ -76,6 +76,14 @@ StandardError=append:$LOG_FILE
 WantedBy=multi-user.target
 EOF
 
+# ---- sudoers rule: allow the service user to run shutdown without a password ----
+# This is required so the web page's "Shutdown Pi" button can cleanly halt the OS.
+# The rule is scoped to /sbin/shutdown only — no other sudo access is granted.
+SUDOERS_FILE="/etc/sudoers.d/parrotpi"
+echo "Installing sudoers rule for clean shutdown ($SUDOERS_FILE)..."
+echo "$USER_NAME ALL=(ALL) NOPASSWD: /sbin/shutdown" | sudo tee "$SUDOERS_FILE" > /dev/null
+sudo chmod 440 "$SUDOERS_FILE"
+
 # ---- reload systemd ----
 echo "Reloading systemd..."
 sudo systemctl daemon-reload

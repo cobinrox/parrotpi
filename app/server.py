@@ -174,6 +174,17 @@ def restart_server():
     threading.Thread(target=_do_restart, daemon=True).start()
     return jsonify({"status": "restarting"})
 
+@app.route("/shutdown", methods=["POST"])
+def shutdown_pi():
+    """Clean OS shutdown. Requires passwordless sudo for /sbin/shutdown —
+    the install script writes /etc/sudoers.d/parrotpi to grant this."""
+    def _do_shutdown():
+        time.sleep(1.5)
+        logging.info("Shutting down Raspberry Pi now...")
+        os.system("sudo shutdown -h now")
+    threading.Thread(target=_do_shutdown, daemon=True).start()
+    return jsonify({"status": "shutting down"})
+
 @app.route("/stop", methods=["POST"])
 def stop_all():
     """Emergency stop: kills mic, drains audio queue, beak thread self-stops."""
