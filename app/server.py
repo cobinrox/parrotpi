@@ -238,11 +238,12 @@ def animate_beak():
         while audio_stream and audio_stream.active:
             if mic_active or not audio_queue.empty():
                 silence_count = 0
-                if first_move and BIRD == "big":
-                    servo_set_position('open')
-                    first_move = False
-                else:
-                    servo_set_position('anim')
+                #if first_move and BIRD == "big":
+                #if BIRD == "big":
+                #    servo_set_position('open')
+               #     first_move = False
+                #else:
+                servo_set_position('anim')
                 time.sleep(0.08)
                 servo_set_position('closed')
                 time.sleep(0.08)
