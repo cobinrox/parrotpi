@@ -160,6 +160,33 @@
   max-height: 160px;
   overflow-y: auto;
 }
+#manageSavedList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.manage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.manage-row span {
+  flex: 1;
+  font-size: 0.9rem;
+  color: #ccc;
+}
+.delete-btn {
+  background: #5a1a1a;
+  border: 1px solid #c62828;
+  color: #ff8a80;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.delete-btn:hover { background: #7a2020; }
 #replayDialog .close-btn, #adminDialog .close-btn {
   margin-top: 16px;
   background: #333;
@@ -268,6 +295,52 @@
 }
 .info-tip.visible { display: block; }
 
+/* ── Save/Replay compact button ── */
+.save-replay-btn {
+  padding: 5px 18px;
+  font-size: 0.8rem;
+}
+
+/* ── More… dropdown ── */
+.more-wrap { position: relative; display: inline-block; }
+#moreDropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #2d2d44;
+  border: 1px solid #555;
+  border-radius: 8px;
+  min-width: 160px;
+  max-height: 50vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  z-index: 20;
+  box-shadow: 0 6px 20px #0009;
+}
+#moreDropdown.visible { display: block; }
+#moreDropdown button {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #3a3a55;
+  color: #eee;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+#moreDropdown button:last-child { border-bottom: none; }
+#moreDropdown button:hover { background: #3c3c5c; }
+#moreDropdown .dropdown-empty {
+  padding: 10px 16px;
+  color: #666;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
 </style>
 </head>
 <body>
@@ -301,6 +374,7 @@
   <button class="info-btn" onclick="toggleTip('httTip')" type="button">i</button>
   <div id="httTip" class="info-tip">Press and hold to speak — your voice plays live through the parrot. Release to stop. Enable Mic first!</div>
 </div>
+<button onclick="openReplayDialog()" class="quickBtn ctrl-btn save-replay-btn">Save / Replay</button>
 
 <div class="meter-wrap" id="meterWrap">
   <div id="vuMeter"><div id="vuBar"></div></div>
@@ -313,31 +387,36 @@
   <button onclick="sayPhrase('Does He Talk')" class="quickBtn ctrl-btn">Does He Talk</button>
   <button onclick="sayPhrase('F#$@!!')" class="quickBtn ctrl-btn">F#$@!!</button>
   <button onclick="sayPhrase('Squawk3')" class="quickBtn ctrl-btn">Squawk3</button>
-  <button onclick="openReplayDialog()" class="quickBtn ctrl-btn">Replay(*)</button>
+  <div class="more-wrap">
+    <button onclick="openMoreDropdown()" class="quickBtn ctrl-btn">More…</button>
+    <div id="moreDropdown">
+      <div class="dropdown-empty">No saved phrases yet</div>
+    </div>
+  </div>
 </div>
 
 <!-- STOP / RESTART / SHUTDOWN / ADMIN BUTTONS -->
 <div style="margin-top:24px; border-top:1px solid #333; padding-top:16px; width:100%; display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
   <button id="stopBtn" onclick="stopAll()"
-    style="padding:10px 22px; font-size:0.85rem; font-weight:bold; border-radius:8px;
+    style="padding:6px 16px; font-size:0.8rem; font-weight:bold; border-radius:8px;
            cursor:pointer; background:#c62828; color:#fff; border:2px solid #ff5252;
            letter-spacing:1px; box-shadow:0 0 14px #c6282866; transition:background 0.15s;">
     ⛔ Stop
   </button>
   <button id="restartBtn" onclick="restartServer()"
-    style="padding:10px 22px; font-size:0.85rem; font-weight:bold; border-radius:8px;
+    style="padding:6px 16px; font-size:0.8rem; font-weight:bold; border-radius:8px;
            cursor:pointer; background:#4a0000; color:#ff8a80; border:1px solid #c62828;
            letter-spacing:1px; transition:background 0.15s;">
     ⟳ Restart
   </button>
   <button id="shutdownBtn" onclick="shutdownPi()"
-    style="padding:10px 22px; font-size:0.85rem; font-weight:bold; border-radius:8px;
+    style="padding:6px 16px; font-size:0.8rem; font-weight:bold; border-radius:8px;
            cursor:pointer; background:#7b1fa2; color:#fff; border:2px solid #ce93d8;
            letter-spacing:1px; box-shadow:0 0 10px #7b1fa266; transition:background 0.15s;">
     ⏻ Shutdown
   </button>
   <button onclick="document.getElementById('adminDialog').showModal()"
-    style="padding:10px 22px; font-size:0.85rem; font-weight:bold; border-radius:8px;
+    style="padding:6px 16px; font-size:0.8rem; font-weight:bold; border-radius:8px;
            cursor:pointer; background:#1a3a4a; color:#80cbc4; border:1px solid #4db6ac;
            letter-spacing:1px; transition:background 0.15s;">
     ⚙️ Admin…
@@ -346,7 +425,13 @@
 
 <!-- REPLAY DIALOG -->
 <dialog id="replayDialog">
-  <h3>🦜 Replay Options</h3>
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+    <h3 style="margin:0; font-size:1rem; color:#f4c542; letter-spacing:1px;">💾 Save My Last Phrase</h3>
+    <button class="info-btn" onclick="toggleTip('saveDialogTip')" type="button">i</button>
+    <div id="saveDialogTip" class="info-tip" style="top:calc(100% + 6px); left:0;">
+      After using Hold to Talk, open this dialog to replay what you said or save it as a named phrase — then play it again anytime using the More… button!
+    </div>
+  </div>
 
   <div class="dialog-section">
     <span class="dialog-label">Last Recorded</span>
@@ -362,8 +447,8 @@
   </div>
 
   <div class="dialog-section">
-    <span class="dialog-label">Saved Phrases</span>
-    <div id="savedFileList"><em style="color:#666; font-size:0.85rem;">Loading…</em></div>
+    <span class="dialog-label">Manage Saved Phrases</span>
+    <div id="manageSavedList"><em style="color:#666; font-size:0.85rem;">Loading…</em></div>
   </div>
 
   <button class="close-btn" onclick="document.getElementById('replayDialog').close()">Close</button>
@@ -738,19 +823,50 @@ async function stopAll() {
   }
 }
 
-// ── Replay dialog ──
-async function openReplayDialog() {
-  const dialog = document.getElementById('replayDialog');
-  const listEl = document.getElementById('savedFileList');
-  listEl.innerHTML = '<em style="color:#666; font-size:0.85rem;">Loading…</em>';
-  dialog.showModal();
+// ── More… dropdown ──
+async function openMoreDropdown() {
+  const dropdown = document.getElementById('moreDropdown');
+  const isVisible = dropdown.classList.contains('visible');
+  dropdown.classList.remove('visible');
+  if (isVisible) return;
+
+  dropdown.innerHTML = '<div class="dropdown-empty">Loading…</div>';
+  dropdown.classList.add('visible');
 
   try {
     const res = await fetch('/list_saved');
     const data = await res.json();
     const files = data.files || [];
+    if (files.length === 0) {
+      dropdown.innerHTML = '<div class="dropdown-empty">No saved phrases yet</div>';
+    } else {
+      dropdown.innerHTML = files.map(f => {
+        const name = f.replace('.wav', '');
+        return `<button onclick="playSaved('${f}'); document.getElementById('moreDropdown').classList.remove('visible');">▶ ${name}</button>`;
+      }).join('');
+    }
+  } catch (err) {
+    dropdown.innerHTML = '<div class="dropdown-empty">Failed to load</div>';
+    console.error('list_saved error:', err);
+  }
+}
 
-    // Compute tempN prefill: find highest existing tempN, suggest next
+// ── Save(*) dialog ──
+async function openReplayDialog() {
+  const dialog = document.getElementById('replayDialog');
+  dialog.showModal();
+  await refreshSaveDialog();
+}
+
+async function refreshSaveDialog() {
+  const manageEl = document.getElementById('manageSavedList');
+  manageEl.innerHTML = '<em style="color:#666; font-size:0.85rem;">Loading…</em>';
+  try {
+    const res = await fetch('/list_saved');
+    const data = await res.json();
+    const files = data.files || [];
+
+    // Compute tempN prefill
     const tempNums = files
       .map(f => f.replace('.wav', ''))
       .filter(n => /^temp\d+$/.test(n))
@@ -758,19 +874,37 @@ async function openReplayDialog() {
     const nextN = tempNums.length > 0 ? Math.max(...tempNums) + 1 : 1;
     document.getElementById('saveNameInput').value = 'temp' + nextN;
 
-    // Populate saved list
+    // Populate manage list
     if (files.length === 0) {
-      listEl.innerHTML = '<em style="color:#666; font-size:0.85rem;">No saved phrases yet</em>';
+      manageEl.innerHTML = '<em style="color:#666; font-size:0.85rem;">No saved phrases yet</em>';
     } else {
-      listEl.innerHTML = files.map(f => {
+      manageEl.innerHTML = files.map(f => {
         const name = f.replace('.wav', '');
-        return `<button class="quickBtn" style="text-align:left;"
-          onclick="playSaved('${f}')">▶ ${name}</button>`;
+        return `<div class="manage-row">
+          <span>${name}</span>
+          <button class="delete-btn" onclick="deletePhrase('${name}')">🗑 Delete</button>
+        </div>`;
       }).join('');
     }
   } catch (err) {
-    listEl.innerHTML = '<em style="color:#c66; font-size:0.85rem;">Failed to load</em>';
+    manageEl.innerHTML = '<em style="color:#c66; font-size:0.85rem;">Failed to load</em>';
     console.error('list_saved error:', err);
+  }
+}
+
+async function deletePhrase(name) {
+  if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+  try {
+    const res = await fetch('/delete_phrase', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    const data = await res.json();
+    if (data.error) { alert('Delete failed: ' + data.error); return; }
+    await refreshSaveDialog();
+  } catch (err) {
+    console.error('delete_phrase error:', err);
   }
 }
 
@@ -794,8 +928,7 @@ async function savePhrase() {
       alert('Save failed: ' + data.error);
       return;
     }
-    // Refresh the saved list in-place
-    await openReplayDialog();
+    await refreshSaveDialog();
   } catch (err) {
     console.error('save_phrase error:', err);
   }
@@ -823,11 +956,12 @@ function toggleTip(id) {
   document.querySelectorAll('.info-tip').forEach(t => t.classList.remove('visible'));
   if (!isVisible) tip.classList.add('visible');
 }
-// Tap anywhere else to dismiss tips
+// Tap anywhere else to dismiss tips and dropdown
 document.addEventListener('pointerdown', (e) => {
-  if (!e.target.closest('.info-wrap')) {
+  if (!e.target.closest('.info-wrap'))
     document.querySelectorAll('.info-tip').forEach(t => t.classList.remove('visible'));
-  }
+  if (!e.target.closest('.more-wrap'))
+    document.getElementById('moreDropdown').classList.remove('visible');
 });
 
 // Initialize UI and load current settings on page startup

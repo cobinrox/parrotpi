@@ -188,6 +188,19 @@ def save_phrase():
     logging.info(f"Saved phrase: {dest}")
     return jsonify({"status": "saved", "file": f"{name}.wav"})
 
+@app.route("/delete_phrase", methods=["DELETE"])
+def delete_phrase():
+    data = request.get_json()
+    name = data.get("name", "").strip()
+    if not re.match(r'^[a-z0-9]+$', name):
+        return jsonify({"error": "invalid name"}), 400
+    target = AUDIO_DIR / 'saved' / f"{name}.wav"
+    if not target.exists():
+        return jsonify({"error": "file not found"}), 404
+    target.unlink()
+    logging.info(f"Deleted phrase: {target}")
+    return jsonify({"status": "deleted", "file": f"{name}.wav"})
+
 @app.route("/hardware_status")
 def hardware_status():
     busy = mic_active or beak_moving or not audio_queue.empty()
