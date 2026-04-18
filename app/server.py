@@ -11,6 +11,8 @@ import numpy as np
 import threading
 import time
 import os
+import re
+import shutil
 import queue
 import sys
 import signal
@@ -139,19 +141,52 @@ def beak_close():
 def say():
     data = request.get_json()
     phrase = data.get("phrase", "").strip()
-    logging.info(f"SAY: {phrase}")
+    subdir = data.get("subdir", None)
+    logging.info(f"SAY: {phrase} subdir={subdir}")
 
-    phrase_map = {
-        "Does He Talk": "doesthebirdtalk.wav",
-        "Squawk3": "squawk3.wav",
-        "F#$@!!": "curse.wav",
-        "mombeatsme": "mombeatsme.wav",
-        "test": "test.wav"
-    }
+    # Sanitize subdir: must be simple folder name, no traversal
+    if subdir is not None:
+        if not re.match(r'^[a-z0-9_]+$', subdir):
+            return jsonify({"error": "invalid subdir"}), 400
 
-    filename = phrase_map.get(phrase, "squawk3.wav")
-    play_wav(filename)
+    if subdir:
+        # Saved ad-hoc phrase: phrase field IS the filename (with or without .wav)
+        filename = phrase if phrase.endswith('.wav') else phrase + '.wav'
+    else:
+        phrase_map = {
+            "Does He Talk": "doesthebirdtalk.wav",
+            "Squawk3": "squawk3.wav",
+            "F#$@!!": "curse.wav",
+            "mombeatsme": "mombeatsme.wav",
+            "test": "test.wav"
+        }
+        filename = phrase_map.get(phrase, "squawk3.wav")
+
+    play_wav(filename, subdir=subdir)
     return jsonify({"status": "played", "file": filename})
+
+@app.route("/list_saved")
+def list_saved():
+    saved_dir = AUDIO_DIR / 'saved'
+    saved_dir.mkdir(exist_ok=True)
+    files = sorted([f.name for f in saved_dir.glob('*.wav')])
+    return jsonify({"files": files})
+
+@app.route("/save_phrase", methods=["POST"])
+def save_phrase():
+    data = request.get_json()
+    name = data.get("name", "").strip()
+    if not re.match(r'^[a-z0-9]+$', name):
+        return jsonify({"error": "invalid name — use only a-z and 0-9"}), 400
+    test_path = AUDIO_DIR / 'test.wav'
+    if not test_path.exists():
+        return jsonify({"error": "no recording found"}), 404
+    saved_dir = AUDIO_DIR / 'saved'
+    saved_dir.mkdir(exist_ok=True)
+    dest = saved_dir / f"{name}.wav"
+    shutil.copy2(str(test_path), str(dest))
+    logging.info(f"Saved phrase: {dest}")
+    return jsonify({"status": "saved", "file": f"{name}.wav"})
 
 @app.route("/hardware_status")
 def hardware_status():
@@ -349,9 +384,9 @@ def init_audio():
     logging.info("ALL AUDIO INIT FAILED")
     return False
 
-def play_wav(filename):
+def play_wav(filename, subdir=None):
     global parrot_pct
-    filepath = AUDIO_DIR / filename
+    filepath = (AUDIO_DIR / subdir / filename) if subdir else (AUDIO_DIR / filename)
     if not filepath.exists():
         logging.info(f"Missing: {filepath}")
         return

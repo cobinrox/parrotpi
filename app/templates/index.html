@@ -110,6 +110,113 @@
   pointer-events: none;
 }
 
+/* ── Replay dialog ── */
+#replayDialog {
+  background: #1a1a2e;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 280px;
+  max-width: 340px;
+}
+#replayDialog::backdrop {
+  background: rgba(0,0,0,0.65);
+}
+#replayDialog h3 {
+  margin-bottom: 14px;
+  font-size: 1rem;
+  color: #f4c542;
+  letter-spacing: 1px;
+}
+.dialog-section {
+  border-top: 1px solid #333;
+  padding-top: 12px;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dialog-section:first-of-type { border-top: none; margin-top: 0; padding-top: 0; }
+.dialog-label {
+  font-size: 0.75rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+#saveNameInput {
+  background: #2d2d44;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 0.95rem;
+  width: 100%;
+}
+#savedFileList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+#replayDialog .close-btn, #adminDialog .close-btn {
+  margin-top: 16px;
+  background: #333;
+  color: #aaa;
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+/* ── Admin dialog ── */
+#adminDialog {
+  background: #1a1a2e;
+  color: #eee;
+  border: 1px solid #4db6ac;
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 320px;
+  max-width: 420px;
+  width: 92vw;
+}
+#adminDialog::backdrop { background: rgba(0,0,0,0.65); }
+.admin-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.admin-dialog-header h3 { font-size: 1rem; color: #80cbc4; letter-spacing: 1px; margin: 0; }
+.dialog-x-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.dialog-x-btn:hover { color: #eee; }
+.admin-stub {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.network-info {
+  background: #0d2a30;
+  border: 1px solid #2a5a60;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: #80cbc4;
+  margin-bottom: 6px;
+}
+.network-info span { color: #f4c542; font-weight: bold; }
+
 #micRequestBtn {
   padding: 12px 24px;
   font-size: 1rem;
@@ -125,6 +232,41 @@
 #micRequestBtn:hover  { background: #a06000; }
 #micRequestBtn.granted { background: #1b5e20; border-color: #4caf50; cursor: default; }
 #micRequestBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ── Info icon + tip bubble ── */
+.info-wrap { display: flex; align-items: center; gap: 8px; position: relative; }
+.info-btn {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: #1976d2;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: bold;
+  font-style: italic;
+  font-family: Georgia, serif;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.info-btn:hover { background: #1565c0; }
+.info-tip {
+  display: none;
+  position: absolute;
+  left: 0; top: calc(100% + 8px);
+  background: #2d2d44;
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: #ccc;
+  line-height: 1.4;
+  max-width: 240px;
+  z-index: 10;
+  box-shadow: 0 4px 16px #0008;
+}
+.info-tip.visible { display: block; }
 
 </style>
 </head>
@@ -149,8 +291,16 @@
   <input id="parrotSlider" type="range" min="5" max="90" value="20" step="5" style="flex:1;">
   <span id="parrotValue" style="width:36px; text-align:right; font-size:0.85rem;">+20%</span>
 </div>
-<button id="micRequestBtn" onclick="requestMic()">🎤 Enable Mic</button>
-<button id="holdButton" class="ctrl-btn" disabled>HOLD TO<br>TALK (*)</button>
+<div class="info-wrap">
+  <button id="micRequestBtn" onclick="requestMic()">🎤 Enable Mic</button>
+  <button class="info-btn" onclick="toggleTip('micTip')" type="button">i</button>
+  <div id="micTip" class="info-tip">Tap to grant microphone access. Required before you can use Hold to Talk to speak through the parrot!</div>
+</div>
+<div class="info-wrap">
+  <button id="holdButton" class="ctrl-btn" disabled>HOLD TO<br>TALK (*)</button>
+  <button class="info-btn" onclick="toggleTip('httTip')" type="button">i</button>
+  <div id="httTip" class="info-tip">Press and hold to speak — your voice plays live through the parrot. Release to stop. Enable Mic first!</div>
+</div>
 
 <div class="meter-wrap" id="meterWrap">
   <div id="vuMeter"><div id="vuBar"></div></div>
@@ -163,18 +313,10 @@
   <button onclick="sayPhrase('Does He Talk')" class="quickBtn ctrl-btn">Does He Talk</button>
   <button onclick="sayPhrase('F#$@!!')" class="quickBtn ctrl-btn">F#$@!!</button>
   <button onclick="sayPhrase('Squawk3')" class="quickBtn ctrl-btn">Squawk3</button>
-  <button onclick="sayPhrase('test')" class="quickBtn ctrl-btn">Replay(*)</button>
+  <button onclick="openReplayDialog()" class="quickBtn ctrl-btn">Replay(*)</button>
 </div>
 
-<!-- SERVO CONTROL ROW -->
-<div style="display:flex; gap:12px; margin-top:14px; flex-wrap:wrap; justify-content:center;">
-  <button onclick="headLeft()" class="quickBtn ctrl-btn">« head</button>
-  <button onclick="beakClose()" class="quickBtn ctrl-btn">Beak Close</button>
-  <button onclick="beakOpen()" class="quickBtn ctrl-btn">Beak Open</button>
-  <button onclick="headRight()" class="quickBtn ctrl-btn">head »</button>
-</div>
-
-<!-- STOP / RESTART / SHUTDOWN BUTTONS -->
+<!-- STOP / RESTART / SHUTDOWN / ADMIN BUTTONS -->
 <div style="margin-top:24px; border-top:1px solid #333; padding-top:16px; width:100%; display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
   <button id="stopBtn" onclick="stopAll()"
     style="padding:10px 22px; font-size:0.85rem; font-weight:bold; border-radius:8px;
@@ -194,7 +336,87 @@
            letter-spacing:1px; box-shadow:0 0 10px #7b1fa266; transition:background 0.15s;">
     ⏻ Shutdown
   </button>
+  <button onclick="document.getElementById('adminDialog').showModal()"
+    style="padding:10px 22px; font-size:0.85rem; font-weight:bold; border-radius:8px;
+           cursor:pointer; background:#1a3a4a; color:#80cbc4; border:1px solid #4db6ac;
+           letter-spacing:1px; transition:background 0.15s;">
+    ⚙️ Admin…
+  </button>
 </div>
+
+<!-- REPLAY DIALOG -->
+<dialog id="replayDialog">
+  <h3>🦜 Replay Options</h3>
+
+  <div class="dialog-section">
+    <span class="dialog-label">Last Recorded</span>
+    <button class="quickBtn" onclick="playLast()">▶ Play Last Phrase</button>
+  </div>
+
+  <div class="dialog-section">
+    <span class="dialog-label">Save Last Phrase As</span>
+    <div style="display:flex; gap:8px;">
+      <input id="saveNameInput" type="text" maxlength="24" autocomplete="off" autocorrect="off" spellcheck="false">
+      <button class="quickBtn" onclick="savePhrase()" style="white-space:nowrap;">💾 Save</button>
+    </div>
+  </div>
+
+  <div class="dialog-section">
+    <span class="dialog-label">Saved Phrases</span>
+    <div id="savedFileList"><em style="color:#666; font-size:0.85rem;">Loading…</em></div>
+  </div>
+
+  <button class="close-btn" onclick="document.getElementById('replayDialog').close()">Close</button>
+</dialog>
+
+<!-- ADMIN DIALOG -->
+<dialog id="adminDialog">
+  <div class="admin-dialog-header">
+    <h3>⚙️ Admin</h3>
+    <button class="dialog-x-btn" onclick="document.getElementById('adminDialog').close()">✕</button>
+  </div>
+
+  <!-- NETWORK -->
+  <div class="dialog-section">
+    <span class="dialog-label">Network</span>
+    <div class="network-info">
+      Mode: <span>Private</span> &nbsp;·&nbsp; SSID: <span>parrotpi</span>
+    </div>
+    <button class="quickBtn admin-stub" title="Not yet implemented">🌐 Change Network…</button>
+  </div>
+
+  <!-- BEAK / HEAD CONTROLS -->
+  <div class="dialog-section">
+    <span class="dialog-label">Beak &amp; Head</span>
+    <div style="display:flex; gap:8px;">
+      <button onclick="headLeft()"  class="quickBtn ctrl-btn" style="flex:1;">« head</button>
+      <button onclick="beakClose()" class="quickBtn ctrl-btn" style="flex:1;">Beak Close</button>
+      <button onclick="beakOpen()"  class="quickBtn ctrl-btn" style="flex:1;">Beak Open</button>
+      <button onclick="headRight()" class="quickBtn ctrl-btn" style="flex:1;">head »</button>
+    </div>
+  </div>
+
+  <!-- PHRASES -->
+  <div class="dialog-section">
+    <span class="dialog-label">Phrases</span>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="quickBtn admin-stub" title="Not yet implemented">📂 Add Phrases…</button>
+      <button class="quickBtn admin-stub" title="Not yet implemented">🗑 Remove Phrases…</button>
+    </div>
+  </div>
+
+  <!-- LANGUAGE -->
+  <div class="dialog-section">
+    <span class="dialog-label">Language</span>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="quickBtn admin-stub" title="Not yet implemented">🇪🇸 Spanish</button>
+      <button class="quickBtn admin-stub" title="Not yet implemented">🇩🇪 German</button>
+      <button class="quickBtn admin-stub" title="Not yet implemented">🇫🇷 French</button>
+    </div>
+  </div>
+
+  <button class="close-btn" onclick="document.getElementById('adminDialog').close()">Close</button>
+</dialog>
 
 <!-- Socket.IO -->
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"
@@ -408,12 +630,13 @@ async function setParrot(pct) {
   }
 }
 
-function sayPhrase(text) {
-  console.log("Phrase:", text);
+function sayPhrase(text, subdir) {
+  console.log("Phrase:", text, subdir || '');
+  setHardwareStatus(true, "audio");
   fetch('/say', {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phrase: text })
+    body: JSON.stringify({ phrase: text, subdir: subdir || null })
   });
 }
 
@@ -514,6 +737,98 @@ async function stopAll() {
     console.error("stop failed:", err);
   }
 }
+
+// ── Replay dialog ──
+async function openReplayDialog() {
+  const dialog = document.getElementById('replayDialog');
+  const listEl = document.getElementById('savedFileList');
+  listEl.innerHTML = '<em style="color:#666; font-size:0.85rem;">Loading…</em>';
+  dialog.showModal();
+
+  try {
+    const res = await fetch('/list_saved');
+    const data = await res.json();
+    const files = data.files || [];
+
+    // Compute tempN prefill: find highest existing tempN, suggest next
+    const tempNums = files
+      .map(f => f.replace('.wav', ''))
+      .filter(n => /^temp\d+$/.test(n))
+      .map(n => parseInt(n.replace('temp', ''), 10));
+    const nextN = tempNums.length > 0 ? Math.max(...tempNums) + 1 : 1;
+    document.getElementById('saveNameInput').value = 'temp' + nextN;
+
+    // Populate saved list
+    if (files.length === 0) {
+      listEl.innerHTML = '<em style="color:#666; font-size:0.85rem;">No saved phrases yet</em>';
+    } else {
+      listEl.innerHTML = files.map(f => {
+        const name = f.replace('.wav', '');
+        return `<button class="quickBtn" style="text-align:left;"
+          onclick="playSaved('${f}')">▶ ${name}</button>`;
+      }).join('');
+    }
+  } catch (err) {
+    listEl.innerHTML = '<em style="color:#c66; font-size:0.85rem;">Failed to load</em>';
+    console.error('list_saved error:', err);
+  }
+}
+
+function playLast() {
+  document.getElementById('replayDialog').close();
+  sayPhrase('test');
+}
+
+async function savePhrase() {
+  const input = document.getElementById('saveNameInput');
+  const name = input.value.trim();
+  if (!name) { input.focus(); return; }
+  try {
+    const res = await fetch('/save_phrase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert('Save failed: ' + data.error);
+      return;
+    }
+    // Refresh the saved list in-place
+    await openReplayDialog();
+  } catch (err) {
+    console.error('save_phrase error:', err);
+  }
+}
+
+function playSaved(filename) {
+  document.getElementById('replayDialog').close();
+  sayPhrase(filename, 'saved');
+}
+
+// Strip non-[a-z0-9] characters as the user types in the save name input
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('saveNameInput');
+  input.addEventListener('input', () => {
+    const clean = input.value.replace(/[^a-z0-9]/g, '');
+    if (clean !== input.value) input.value = clean;
+  });
+});
+
+// ── Info tip toggles ──
+function toggleTip(id) {
+  const tip = document.getElementById(id);
+  const isVisible = tip.classList.contains('visible');
+  // Close all tips first
+  document.querySelectorAll('.info-tip').forEach(t => t.classList.remove('visible'));
+  if (!isVisible) tip.classList.add('visible');
+}
+// Tap anywhere else to dismiss tips
+document.addEventListener('pointerdown', (e) => {
+  if (!e.target.closest('.info-wrap')) {
+    document.querySelectorAll('.info-tip').forEach(t => t.classList.remove('visible'));
+  }
+});
 
 // Initialize UI and load current settings on page startup
 window.addEventListener("load", () => {
