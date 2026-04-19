@@ -16,6 +16,8 @@ import shutil
 import queue
 import sys
 import signal
+import socket
+import subprocess
 from pathlib import Path
 
 # Setup logging
@@ -246,6 +248,59 @@ def stop_all():
             break
     logging.info("STOP: mic killed, audio queue drained")
     return jsonify({"status": "stopped"})
+
+_NETWORK_CONNECTIONS = {'parrotpi-dev', 'parrotpi-private'}
+
+def _get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return 'unknown'
+
+def _get_active_connection():
+    try:
+        result = subprocess.run(
+            ['nmcli', '-t', '-f', 'NAME', 'connection', 'show', '--active'],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            name = line.strip()
+            if name in _NETWORK_CONNECTIONS:
+                return name
+        return 'unknown'
+    except Exception as e:
+        logging.warning(f"nmcli query failed: {e}")
+        return 'unknown'
+
+@app.route('/networkinfo')
+def network_info():
+    return jsonify({'ip': _get_local_ip(), 'mode': _get_active_connection()})
+
+@app.route('/network', methods=['PUT'])
+def set_network():
+    data = request.get_json()
+    mode = (data or {}).get('mode', '').strip()
+    if mode not in _NETWORK_CONNECTIONS:
+        return jsonify({'error': 'invalid mode'}), 400
+
+    def _switch():
+        time.sleep(0.5)
+        logging.info(f"Switching network to {mode}...")
+        result = subprocess.run(
+            ['sudo', 'nmcli', 'connection', 'up', mode],
+            capture_output=True, text=True, timeout=30
+        )
+        logging.info(f"nmcli rc={result.returncode} stdout={result.stdout.strip()} stderr={result.stderr.strip()}")
+        time.sleep(2)
+        logging.info("Restarting service after network switch...")
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=_switch, daemon=True).start()
+    return jsonify({'status': 'switching', 'mode': mode})
 
 # ===== AUDIO ENGINE =====
 

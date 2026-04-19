@@ -243,6 +243,16 @@
   margin-bottom: 6px;
 }
 .network-info span { color: #f4c542; font-weight: bold; }
+.network-select {
+  background: #0d2a30;
+  color: #f4c542;
+  border: 1px solid #2a5a60;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.82rem;
+  flex: 1;
+  cursor: pointer;
+}
 
 #micRequestBtn {
   padding: 12px 24px;
@@ -415,7 +425,7 @@
            letter-spacing:1px; box-shadow:0 0 10px #7b1fa266; transition:background 0.15s;">
     ⏻ Shutdown
   </button>
-  <button onclick="document.getElementById('adminDialog').showModal()"
+  <button onclick="document.getElementById('adminDialog').showModal(); loadNetworkInfo()"
     style="padding:6px 16px; font-size:0.8rem; font-weight:bold; border-radius:8px;
            cursor:pointer; background:#1a3a4a; color:#80cbc4; border:1px solid #4db6ac;
            letter-spacing:1px; transition:background 0.15s;">
@@ -454,6 +464,24 @@
   <button class="close-btn" onclick="document.getElementById('replayDialog').close()">Close</button>
 </dialog>
 
+<!-- NETWORK AUTH DIALOG -->
+<dialog id="networkAuthDialog" style="background:#1a1a2e; color:#eee; border:1px solid #4db6ac; border-radius:12px; padding:20px; min-width:280px; max-width:360px; width:88vw;">
+  <div class="admin-dialog-header">
+    <h3>🔒 Admin Authentication</h3>
+    <button class="dialog-x-btn" onclick="document.getElementById('networkAuthDialog').close()">✕</button>
+  </div>
+  <p style="font-size:0.82rem; color:#aaa; margin:0 0 12px;">Enter the admin passphrase to apply network changes.</p>
+  <input id="networkAuthInput" type="password" autocomplete="off"
+    placeholder="passphrase"
+    style="width:100%; box-sizing:border-box; background:#0d2a30; color:#f4c542; border:1px solid #2a5a60;
+           border-radius:6px; padding:8px 10px; font-size:1rem; letter-spacing:0.15em; outline:none;">
+  <div id="networkAuthError" style="color:#ef5350; font-size:0.78rem; min-height:1.2em; margin-top:6px;"></div>
+  <div style="display:flex; gap:8px; margin-top:12px;">
+    <button class="quickBtn" onclick="submitNetworkAuth()" style="flex:1;">Confirm</button>
+    <button class="quickBtn" onclick="document.getElementById('networkAuthDialog').close()" style="flex:1; background:#333; color:#aaa; border-color:#555;">Cancel</button>
+  </div>
+</dialog>
+
 <!-- ADMIN DIALOG -->
 <dialog id="adminDialog">
   <div class="admin-dialog-header">
@@ -463,11 +491,22 @@
 
   <!-- NETWORK -->
   <div class="dialog-section">
-    <span class="dialog-label">Network</span>
-    <div class="network-info">
-      Mode: <span>Private</span> &nbsp;·&nbsp; SSID: <span>parrotpi</span>
+    <div class="info-wrap">
+      <span class="dialog-label">Network</span>
+      <button class="info-btn" onclick="toggleTip('networkModeTip')" type="button">i</button>
+      <div id="networkModeTip" class="info-tip">Set the parrot to broadcast its own private Wi-Fi network (use this at a party — phones connect directly to the parrot) or join an existing home network (use this during development so the Pi has internet access).</div>
     </div>
-    <button class="quickBtn admin-stub" title="Not yet implemented">🌐 Change Network…</button>
+    <div class="network-info">
+      IP: <span id="adminNetIP">…</span> &nbsp;·&nbsp; Mode: <span id="adminNetMode">…</span>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+      <select id="networkModeSelect" class="network-select">
+        <option value="parrotpi-dev">parrotpi-dev (home)</option>
+        <option value="parrotpi-private">parrotpi-private (private)</option>
+      </select>
+      <button id="changeNetworkBtn" class="quickBtn" onclick="changeNetwork()">🌐 Apply</button>
+    </div>
+    <div id="networkChangeStatus" style="font-size:0.78rem; color:#80cbc4; margin-top:4px; min-height:1.2em;"></div>
   </div>
 
   <!-- BEAK / HEAD CONTROLS -->
@@ -494,6 +533,7 @@
   <div class="dialog-section">
     <span class="dialog-label">Language</span>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="quickBtn admin-stub" title="Not yet implemented">🇺🇸 English</button>
       <button class="quickBtn admin-stub" title="Not yet implemented">🇪🇸 Spanish</button>
       <button class="quickBtn admin-stub" title="Not yet implemented">🇩🇪 German</button>
       <button class="quickBtn admin-stub" title="Not yet implemented">🇫🇷 French</button>
@@ -946,6 +986,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const clean = input.value.replace(/[^a-z0-9]/g, '');
     if (clean !== input.value) input.value = clean;
   });
+  document.getElementById('networkAuthInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitNetworkAuth();
+  });
 });
 
 // ── Info tip toggles ──
@@ -963,6 +1006,66 @@ document.addEventListener('pointerdown', (e) => {
   if (!e.target.closest('.more-wrap'))
     document.getElementById('moreDropdown').classList.remove('visible');
 });
+
+// ── Network info (Admin dialog) ──
+async function loadNetworkInfo() {
+  document.getElementById('adminNetIP').textContent = '…';
+  document.getElementById('adminNetMode').textContent = '…';
+  document.getElementById('networkChangeStatus').textContent = '';
+  document.getElementById('changeNetworkBtn').disabled = false;
+  try {
+    const res = await fetch('/networkinfo');
+    const d = await res.json();
+    document.getElementById('adminNetIP').textContent = d.ip || '?';
+    document.getElementById('adminNetMode').textContent = d.mode || '?';
+    const sel = document.getElementById('networkModeSelect');
+    if (d.mode && sel.querySelector(`option[value="${d.mode}"]`)) {
+      sel.value = d.mode;
+    }
+  } catch (e) {
+    document.getElementById('adminNetIP').textContent = 'error';
+    document.getElementById('adminNetMode').textContent = 'error';
+  }
+}
+
+let _pendingNetworkMode = null;
+
+async function changeNetwork() {
+  const sel = document.getElementById('networkModeSelect');
+  const currentMode = document.getElementById('adminNetMode').textContent;
+  const newMode = sel.value;
+  if (newMode === currentMode) {
+    document.getElementById('networkChangeStatus').textContent = 'Already on that mode.';
+    return;
+  }
+  if (!confirm(`Switch network to "${newMode}"?\nThe server will restart — you may need to reconnect.`)) return;
+  _pendingNetworkMode = newMode;
+  document.getElementById('networkAuthInput').value = '';
+  document.getElementById('networkAuthError').textContent = '';
+  document.getElementById('networkAuthDialog').showModal();
+  setTimeout(() => document.getElementById('networkAuthInput').focus(), 50);
+}
+
+async function submitNetworkAuth() {
+  const pwd = document.getElementById('networkAuthInput').value;
+  if (pwd !== 'p') {
+    document.getElementById('networkAuthError').textContent = 'Incorrect passphrase.';
+    document.getElementById('networkAuthInput').select();
+    return;
+  }
+  document.getElementById('networkAuthDialog').close();
+  const btn = document.getElementById('changeNetworkBtn');
+  btn.disabled = true;
+  document.getElementById('networkChangeStatus').textContent = 'Switching… server will restart shortly.';
+  try {
+    await fetch('/network', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: _pendingNetworkMode })
+    });
+  } catch (_) {}
+  _pendingNetworkMode = null;
+}
 
 // Initialize UI and load current settings on page startup
 window.addEventListener("load", () => {

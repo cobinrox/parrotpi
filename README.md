@@ -8,7 +8,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 optionally edit config.py (e.g. set simulation mode)
 python3 server.py
-User can hit the sever over browse by https://parrotpi.local (serves over caddy)
+User can hit the sever over browse by https://parrotpi (serves over caddy)
 For tech information, see claude.md file
 ```
 
