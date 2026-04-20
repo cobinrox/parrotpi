@@ -206,6 +206,7 @@ def delete_phrase():
 @app.route("/hardware_status")
 def hardware_status():
     busy = mic_active or beak_moving or not audio_queue.empty()
+    logging.info(f"Hardware status requested: busy={busy}, mic={mic_active}, beak={beak_moving}, queue={audio_queue.qsize()}")
     return jsonify({
         "busy": busy,
         "mic_active": mic_active,
@@ -249,7 +250,13 @@ def stop_all():
     logging.info("STOP: mic killed, audio queue drained")
     return jsonify({"status": "stopped"})
 
-_NETWORK_CONNECTIONS = {'parrotpi-dev', 'parrotpi-private'}
+# ===== NETWORK DIAGNOSTIC FUNCTIONS =====
+
+def _get_hostname():
+    try:
+        return socket.gethostname()
+    except Exception:
+        return 'unknown'
 
 def _get_local_ip():
     try:
@@ -261,7 +268,25 @@ def _get_local_ip():
     except Exception:
         return 'unknown'
 
-def _get_active_connection():
+def _get_interface_info():
+    """Get active interface name and type (WiFi/Ethernet)"""
+    try:
+        result = subprocess.run(
+            ['nmcli', '-t', '-f', 'DEVICE,TYPE,CONNECTION', 'device'],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(':')
+            if len(parts) >= 3 and parts[2]:  # has active connection
+                interface = parts[0]
+                iface_type = parts[1]
+                return interface, iface_type
+        return 'unknown', 'unknown'
+    except Exception:
+        return 'unknown', 'unknown'
+
+def _get_active_config_name():
+    """Get the name of the active nmcli connection"""
     try:
         result = subprocess.run(
             ['nmcli', '-t', '-f', 'NAME', 'connection', 'show', '--active'],
@@ -269,38 +294,137 @@ def _get_active_connection():
         )
         for line in result.stdout.splitlines():
             name = line.strip()
-            if name in _NETWORK_CONNECTIONS:
+            if name:
                 return name
         return 'unknown'
-    except Exception as e:
-        logging.warning(f"nmcli query failed: {e}")
+    except Exception:
         return 'unknown'
+
+def _get_ssid():
+    """Get WiFi SSID if connected via WiFi"""
+    try:
+        result = subprocess.run(
+            ['nmcli', '-t', '-f', 'ACTIVE,SSID', 'device', 'wifi', 'list'],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(':')
+            if len(parts) >= 2 and parts[0] == 'yes':
+                return parts[1]
+        return 'N/A'
+    except Exception:
+        return 'N/A'
+
+def _get_signal_strength():
+    """Get WiFi signal strength if connected"""
+    try:
+        result = subprocess.run(
+            ['nmcli', '-t', '-f', 'ACTIVE,SIGNAL', 'device', 'wifi', 'list'],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(':')
+            if len(parts) >= 2 and parts[0] == 'yes':
+                signal = parts[1]
+                return f"{signal}%" if signal else 'unknown'
+        return 'N/A'
+    except Exception:
+        return 'N/A'
+
+def _get_gateway():
+    """Get default gateway IP"""
+    try:
+        result = subprocess.run(
+            ['ip', 'route', 'show'],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if 'default via' in line:
+                parts = line.split()
+                if len(parts) >= 3:
+                    return parts[2]
+        return 'unknown'
+    except Exception:
+        return 'unknown'
+
+def _get_dns_servers():
+    """Get DNS servers from resolv.conf"""
+    try:
+        with open('/etc/resolv.conf', 'r') as f:
+            dns_list = []
+            for line in f:
+                if line.startswith('nameserver'):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        dns_list.append(parts[1])
+            return dns_list if dns_list else ['unknown']
+    except Exception:
+        return ['unknown']
+
+def _get_mac_address():
+    """Get MAC address of active interface"""
+    try:
+        iface, _ = _get_interface_info()
+        if iface == 'unknown':
+            return 'unknown'
+        result = subprocess.run(
+            ['ip', 'addr', 'show', iface],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if 'link/ether' in line:
+                parts = line.split()
+                if len(parts) >= 2:
+                    return parts[1]
+        return 'unknown'
+    except Exception:
+        return 'unknown'
+
+def _check_internet():
+    """Check if internet is accessible (ping 8.8.8.8)"""
+    try:
+        result = subprocess.run(
+            ['ping', '-c', '1', '-W', '2', '8.8.8.8'],
+            capture_output=True, timeout=5
+        )
+        return 'Yes' if result.returncode == 0 else 'No'
+    except Exception:
+        return 'Unknown'
+
+def _get_available_configs():
+    """Get list of available nmcli connection profiles"""
+    try:
+        result = subprocess.run(
+            ['nmcli', '-t', '-f', 'NAME', 'connection'],
+            capture_output=True, text=True, timeout=5
+        )
+        configs = []
+        for line in result.stdout.splitlines():
+            name = line.strip()
+            if name:
+                configs.append(name)
+        return configs if configs else ['unknown']
+    except Exception:
+        return ['unknown']
 
 @app.route('/networkinfo')
 def network_info():
-    return jsonify({'ip': _get_local_ip(), 'mode': _get_active_connection()})
-
-@app.route('/network', methods=['PUT'])
-def set_network():
-    data = request.get_json()
-    mode = (data or {}).get('mode', '').strip()
-    if mode not in _NETWORK_CONNECTIONS:
-        return jsonify({'error': 'invalid mode'}), 400
-
-    def _switch():
-        time.sleep(0.5)
-        logging.info(f"Switching network to {mode}...")
-        result = subprocess.run(
-            ['sudo', 'nmcli', 'connection', 'up', mode],
-            capture_output=True, text=True, timeout=30
-        )
-        logging.info(f"nmcli rc={result.returncode} stdout={result.stdout.strip()} stderr={result.stderr.strip()}")
-        time.sleep(2)
-        logging.info("Restarting service after network switch...")
-        os.kill(os.getpid(), signal.SIGTERM)
-
-    threading.Thread(target=_switch, daemon=True).start()
-    return jsonify({'status': 'switching', 'mode': mode})
+    """Return comprehensive network diagnostic information"""
+    interface, iface_type = _get_interface_info()
+    return jsonify({
+        'hostname': _get_hostname(),
+        'ip': _get_local_ip(),
+        'interface': interface,
+        'interface_type': iface_type,
+        'config_name': _get_active_config_name(),
+        'ssid': _get_ssid(),
+        'signal_strength': _get_signal_strength(),
+        'gateway': _get_gateway(),
+        'dns_servers': _get_dns_servers(),
+        'mac_address': _get_mac_address(),
+        'internet_access': _check_internet(),
+        'available_configs': _get_available_configs()
+    })
 
 # ===== AUDIO ENGINE =====
 

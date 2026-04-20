@@ -242,17 +242,6 @@
   color: #80cbc4;
   margin-bottom: 6px;
 }
-.network-info span { color: #f4c542; font-weight: bold; }
-.network-select {
-  background: #0d2a30;
-  color: #f4c542;
-  border: 1px solid #2a5a60;
-  border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 0.82rem;
-  flex: 1;
-  cursor: pointer;
-}
 
 #micRequestBtn {
   padding: 12px 24px;
@@ -425,7 +414,7 @@
            letter-spacing:1px; box-shadow:0 0 10px #7b1fa266; transition:background 0.15s;">
     ⏻ Shutdown
   </button>
-  <button onclick="document.getElementById('adminDialog').showModal(); loadNetworkInfo()"
+  <button onclick="document.getElementById('adminDialog').showModal()"
     style="padding:6px 16px; font-size:0.8rem; font-weight:bold; border-radius:8px;
            cursor:pointer; background:#1a3a4a; color:#80cbc4; border:1px solid #4db6ac;
            letter-spacing:1px; transition:background 0.15s;">
@@ -464,23 +453,6 @@
   <button class="close-btn" onclick="document.getElementById('replayDialog').close()">Close</button>
 </dialog>
 
-<!-- NETWORK AUTH DIALOG -->
-<dialog id="networkAuthDialog" style="background:#1a1a2e; color:#eee; border:1px solid #4db6ac; border-radius:12px; padding:20px; min-width:280px; max-width:360px; width:88vw;">
-  <div class="admin-dialog-header">
-    <h3>🔒 Admin Authentication</h3>
-    <button class="dialog-x-btn" onclick="document.getElementById('networkAuthDialog').close()">✕</button>
-  </div>
-  <p style="font-size:0.82rem; color:#aaa; margin:0 0 12px;">Enter the admin passphrase to apply network changes.</p>
-  <input id="networkAuthInput" type="password" autocomplete="off"
-    placeholder="passphrase"
-    style="width:100%; box-sizing:border-box; background:#0d2a30; color:#f4c542; border:1px solid #2a5a60;
-           border-radius:6px; padding:8px 10px; font-size:1rem; letter-spacing:0.15em; outline:none;">
-  <div id="networkAuthError" style="color:#ef5350; font-size:0.78rem; min-height:1.2em; margin-top:6px;"></div>
-  <div style="display:flex; gap:8px; margin-top:12px;">
-    <button class="quickBtn" onclick="submitNetworkAuth()" style="flex:1;">Confirm</button>
-    <button class="quickBtn" onclick="document.getElementById('networkAuthDialog').close()" style="flex:1; background:#333; color:#aaa; border-color:#555;">Cancel</button>
-  </div>
-</dialog>
 
 <!-- ADMIN DIALOG -->
 <dialog id="adminDialog">
@@ -493,20 +465,10 @@
   <div class="dialog-section">
     <div class="info-wrap">
       <span class="dialog-label">Network</span>
-      <button class="info-btn" onclick="toggleTip('networkModeTip')" type="button">i</button>
-      <div id="networkModeTip" class="info-tip">Set the parrot to broadcast its own private Wi-Fi network (use this at a party — phones connect directly to the parrot) or join an existing home network (use this during development so the Pi has internet access).</div>
+      <button class="info-btn" onclick="toggleTip('networkInfoTip')" type="button">i</button>
+      <div id="networkInfoTip" class="info-tip">View diagnostic information about your network connection, including IP address, interface, DNS settings, and more.</div>
     </div>
-    <div class="network-info">
-      IP: <span id="adminNetIP">…</span> &nbsp;·&nbsp; Mode: <span id="adminNetMode">…</span>
-    </div>
-    <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
-      <select id="networkModeSelect" class="network-select">
-        <option value="parrotpi-dev">parrotpi-dev (home)</option>
-        <option value="parrotpi-private">parrotpi-private (private)</option>
-      </select>
-      <button id="changeNetworkBtn" class="quickBtn" onclick="changeNetwork()">🌐 Apply</button>
-    </div>
-    <div id="networkChangeStatus" style="font-size:0.78rem; color:#80cbc4; margin-top:4px; min-height:1.2em;"></div>
+    <button class="quickBtn" onclick="document.getElementById('networkInfoModal').showModal(); loadNetworkInfo()" style="width:100%; margin-top:6px;">📡 Network Info…</button>
   </div>
 
   <!-- BEAK / HEAD CONTROLS -->
@@ -541,6 +503,56 @@
   </div>
 
   <button class="close-btn" onclick="document.getElementById('adminDialog').close()">Close</button>
+</dialog>
+
+<!-- NETWORK INFO MODAL -->
+<dialog id="networkInfoModal" style="background:#1a1a2e; color:#eee; border:1px solid #4db6ac; border-radius:12px; padding:20px; min-width:360px; max-width:520px; width:92vw; max-height:80vh; overflow-y:auto;">
+  <div class="admin-dialog-header">
+    <h3>📡 Network Information</h3>
+    <button class="dialog-x-btn" onclick="document.getElementById('networkInfoModal').close()">✕</button>
+  </div>
+
+  <!-- CONNECTION SECTION -->
+  <div style="margin-bottom:16px;">
+    <div style="font-size:0.9rem; font-weight:bold; color:#80cbc4; margin-bottom:8px; border-bottom:1px solid #2a5a60; padding-bottom:4px;">Connection</div>
+    <div style="font-size:0.85rem; line-height:1.6; color:#aaa;">
+      <div><span style="color:#f4c542;">IP Address:</span> <span id="netIP">…</span></div>
+      <div><span style="color:#f4c542;">Interface:</span> <span id="netInterface">…</span></div>
+      <div><span style="color:#f4c542;">Type:</span> <span id="netType">…</span></div>
+      <div><span style="color:#f4c542;">SSID:</span> <span id="netSSID">…</span></div>
+      <div><span style="color:#f4c542;">Signal:</span> <span id="netSignal">…</span></div>
+    </div>
+  </div>
+
+  <!-- CONFIGURATION SECTION -->
+  <div style="margin-bottom:16px;">
+    <div style="font-size:0.9rem; font-weight:bold; color:#80cbc4; margin-bottom:8px; border-bottom:1px solid #2a5a60; padding-bottom:4px;">Configuration</div>
+    <div style="font-size:0.85rem; line-height:1.6; color:#aaa;">
+      <div><span style="color:#f4c542;">Hostname:</span> <span id="netHostname">…</span></div>
+      <div><span style="color:#f4c542;">Active Config:</span> <span id="netConfigName">…</span></div>
+    </div>
+  </div>
+
+  <!-- NETWORK DETAILS SECTION -->
+  <div style="margin-bottom:16px;">
+    <div style="font-size:0.9rem; font-weight:bold; color:#80cbc4; margin-bottom:8px; border-bottom:1px solid #2a5a60; padding-bottom:4px;">Network Details</div>
+    <div style="font-size:0.85rem; line-height:1.6; color:#aaa;">
+      <div><span style="color:#f4c542;">Gateway:</span> <span id="netGateway">…</span></div>
+      <div><span style="color:#f4c542;">MAC Address:</span> <span id="netMAC">…</span></div>
+      <div><span style="color:#f4c542;">DNS Servers:</span> <span id="netDNS">…</span></div>
+    </div>
+  </div>
+
+  <!-- STATUS SECTION -->
+  <div style="margin-bottom:16px;">
+    <div style="font-size:0.9rem; font-weight:bold; color:#80cbc4; margin-bottom:8px; border-bottom:1px solid #2a5a60; padding-bottom:4px;">Status</div>
+    <div style="font-size:0.85rem; line-height:1.6; color:#aaa;">
+      <div><span style="color:#f4c542;">Internet Access:</span> <span id="netInternet">…</span></div>
+      <div><span style="color:#f4c542;">Available Configs:</span> <span id="netConfigs">…</span></div>
+    </div>
+  </div>
+
+  <button class="close-btn" onclick="document.getElementById('networkInfoModal').close()">Close</button>
 </dialog>
 
 <!-- Socket.IO -->
@@ -986,9 +998,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const clean = input.value.replace(/[^a-z0-9]/g, '');
     if (clean !== input.value) input.value = clean;
   });
-  document.getElementById('networkAuthInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submitNetworkAuth();
-  });
 });
 
 // ── Info tip toggles ──
@@ -1007,64 +1016,43 @@ document.addEventListener('pointerdown', (e) => {
     document.getElementById('moreDropdown').classList.remove('visible');
 });
 
-// ── Network info (Admin dialog) ──
+// ── Network info (Network Info Modal) ──
 async function loadNetworkInfo() {
-  document.getElementById('adminNetIP').textContent = '…';
-  document.getElementById('adminNetMode').textContent = '…';
-  document.getElementById('networkChangeStatus').textContent = '';
-  document.getElementById('changeNetworkBtn').disabled = false;
+  // Reset all fields
+  document.getElementById('netIP').textContent = '…';
+  document.getElementById('netInterface').textContent = '…';
+  document.getElementById('netType').textContent = '…';
+  document.getElementById('netSSID').textContent = '…';
+  document.getElementById('netSignal').textContent = '…';
+  document.getElementById('netHostname').textContent = '…';
+  document.getElementById('netConfigName').textContent = '…';
+  document.getElementById('netGateway').textContent = '…';
+  document.getElementById('netMAC').textContent = '…';
+  document.getElementById('netDNS').textContent = '…';
+  document.getElementById('netInternet').textContent = '…';
+  document.getElementById('netConfigs').textContent = '…';
+  
   try {
     const res = await fetch('/networkinfo');
     const d = await res.json();
-    document.getElementById('adminNetIP').textContent = d.ip || '?';
-    document.getElementById('adminNetMode').textContent = d.mode || '?';
-    const sel = document.getElementById('networkModeSelect');
-    if (d.mode && sel.querySelector(`option[value="${d.mode}"]`)) {
-      sel.value = d.mode;
-    }
+    
+    document.getElementById('netIP').textContent = d.ip || 'unknown';
+    document.getElementById('netInterface').textContent = d.interface || 'unknown';
+    document.getElementById('netType').textContent = d.interface_type || 'unknown';
+    document.getElementById('netSSID').textContent = d.ssid || 'N/A';
+    document.getElementById('netSignal').textContent = d.signal_strength || 'N/A';
+    document.getElementById('netHostname').textContent = d.hostname || 'unknown';
+    document.getElementById('netConfigName').textContent = d.config_name || 'unknown';
+    document.getElementById('netGateway').textContent = d.gateway || 'unknown';
+    document.getElementById('netMAC').textContent = d.mac_address || 'unknown';
+    document.getElementById('netDNS').textContent = (d.dns_servers && d.dns_servers.length > 0) ? d.dns_servers.join(', ') : 'unknown';
+    document.getElementById('netInternet').textContent = d.internet_access || 'Unknown';
+    document.getElementById('netConfigs').textContent = (d.available_configs && d.available_configs.length > 0) ? d.available_configs.join(', ') : 'unknown';
   } catch (e) {
-    document.getElementById('adminNetIP').textContent = 'error';
-    document.getElementById('adminNetMode').textContent = 'error';
+    console.error('loadNetworkInfo error:', e);
+    document.getElementById('netIP').textContent = 'error';
+    document.getElementById('netInterface').textContent = 'error';
   }
-}
-
-let _pendingNetworkMode = null;
-
-async function changeNetwork() {
-  const sel = document.getElementById('networkModeSelect');
-  const currentMode = document.getElementById('adminNetMode').textContent;
-  const newMode = sel.value;
-  if (newMode === currentMode) {
-    document.getElementById('networkChangeStatus').textContent = 'Already on that mode.';
-    return;
-  }
-  if (!confirm(`Switch network to "${newMode}"?\nThe server will restart — you may need to reconnect.`)) return;
-  _pendingNetworkMode = newMode;
-  document.getElementById('networkAuthInput').value = '';
-  document.getElementById('networkAuthError').textContent = '';
-  document.getElementById('networkAuthDialog').showModal();
-  setTimeout(() => document.getElementById('networkAuthInput').focus(), 50);
-}
-
-async function submitNetworkAuth() {
-  const pwd = document.getElementById('networkAuthInput').value;
-  if (pwd !== 'p') {
-    document.getElementById('networkAuthError').textContent = 'Incorrect passphrase.';
-    document.getElementById('networkAuthInput').select();
-    return;
-  }
-  document.getElementById('networkAuthDialog').close();
-  const btn = document.getElementById('changeNetworkBtn');
-  btn.disabled = true;
-  document.getElementById('networkChangeStatus').textContent = 'Switching… server will restart shortly.';
-  try {
-    await fetch('/network', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: _pendingNetworkMode })
-    });
-  } catch (_) {}
-  _pendingNetworkMode = null;
 }
 
 // Initialize UI and load current settings on page startup

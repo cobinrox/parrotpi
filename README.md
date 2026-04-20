@@ -66,9 +66,19 @@ sudo apt install caddy
 8) create caddyfile:
 sudo vi /etc/caddy/Caddyfile
 Insert this text and save:
-parrotpi.local {
+parrotpi, 192.168.4.1 {
+    tls internal
     reverse_proxy localhost:5000
 }
+9) for dnsmasq
+sudo apt install dnsmasq
+sudo vi /et/dnsmasq.conf
+Add at the bottom and save:
+interface=wlan0
+sudo systemctl enable dnsmasq
+sudo systemctl restart dnsmasq
+sudo systemctl restart caddy
+address=/parrotpi/192.168.4.1 
 
 
 
