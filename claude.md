@@ -18,7 +18,7 @@ up wav file that it plays upon start up to make sure that the sound card
 - When the Hold to Talk button is pressed, it will stream the users voice over socketio to the server which will play back the voice in near-real time to the speaker of the pi.  It will also apply a pitch and volume based on those slider values on the web page.
 - There are several pre-recorded WAV files that the user of the web page can use to play back phrases and the "Replay" button plays back the last recorded phrase when a user had clicked the Hold to Talk button.
 - There are also a few beak open/close buttons that tell the server to open/close the parrot's beak
-- There is also an Admin dialog that allows you to set a basic network mode for the pi: either broadcasting as a private wifi network/w SSID parrotpi (this is what you would use for deployment/party scenario) or for connecting to a known home wifi network (this is what you would probably normally use during development).  The network modes should be defined in the network management client folder as parrot-private and parrot-dev configuration files, resp.  When running parrot-private on the parrotpi SSID, you can ssh into the pi vi ssh u@192.168.4.1.  When running parrot-dev on a home network, you can ssh into the pi as ssh u@xx.yy.zz.aa, based on the DHCP ip assigned to the pi at boot up by the home network.
+- There is also an Admin dialog that shows network information
 - Again, remember, though, that the buttons are enabled when the parrot server has returned a not-busy poll.
 
 

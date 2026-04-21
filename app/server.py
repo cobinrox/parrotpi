@@ -86,6 +86,26 @@ else:
     }
 
 # ===== YOUR EXACT ROUTES =====
+# Captive portal detection endpoints
+@app.route('/hotspot-detect.html')
+@app.route('/library/test/success.html')
+def apple_captive():
+    return '<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>', 200
+
+@app.route('/generate_204')
+def android_captive():
+    return '', 204
+
+@app.route('/connecttest.txt')
+def windows_captive():
+    return 'Microsoft Connect Test', 200
+
+@app.route('/redirect')
+@app.route('/success.txt')
+def generic_captive():
+    return redirect('http://192.168.4.1')
+
+# normal rest endpoints
 @app.route("/")
 def index():
     logging.info("Serving index.html from app/templates/")
@@ -131,11 +151,13 @@ def set_parrot(percent):
 
 @app.route("/servo/beak/open", methods=["POST"])
 def beak_open():
+    logging.info("Beak open requested")
     servo_set_position('open')
     return jsonify({"status": "beak opened"})
 
 @app.route("/servo/beak/close", methods=["POST"])
 def beak_close():
+    logging.info("Beak close requested")
     servo_set_position('closed')
     return jsonify({"status": "beak closed"})
 
