@@ -29,7 +29,7 @@ up wav file that it plays upon start up to make sure that the sound card
 - PCA9685 GPIO buffer card (to protect GPIO/current spikes)
   
 
-## 9. **Directory Structure** —
+## Directory Structure
 ```
 parrotpi/
   app/
@@ -47,22 +47,23 @@ parrotpi/
   install_as_service.sh
 ``` 
 
-## 11. **Logging** — 
+## Logging
 When run as a service, writes to `/var/log/parrotpi/server.log` with logrotate support.
 
-## 12. **Systemd Integration** — 
+## Systemd Integration
 A custom script (`install_as_service.sh`) installs the project as a systemd service so it:
 • 	starts automatically at boot
 • 	waits for Wi‑Fi/network
 • 	restarts on crash
 • 	logs to the correct directory
 
-## 13. **Virtual Environment** — 
+## Virtual Environment
 Uses a local Python venv inside the project directory.
 The systemd service explicitly uses this interpreter.
 
-## 14. **Dependencies** — Flask, gpiozero, RPi.GPIO, plus standard Python libraries.
-Core Python dependencies include:
+## 14. Dependencies
+- Flask, gpiozero, RPi.GPIO, plus standard Python libraries.
+- Core Python dependencies include:
 - Flask — web server
 - gpiozero — GPIO abstraction
 - RPi.GPIO — hardware backend
@@ -70,8 +71,8 @@ Core Python dependencies include:
 - gunicorn (optional) — production WSGI server
 
 
-## 16. Initial Set Up Notes
-See the README.md file for setting up raspberry pi
+## Initial Set Up Notes
+See the originalnotes.md file for setting up raspberry pi
 
 ## Raspberry Pi GPIO Notes
 ```
@@ -128,4 +129,138 @@ Not 5V tolerant
 ~16mA per pin recommended
 ~50mA total across GPIO
 
+```
+## Install on a Fresh pi
+Prerequisite: complete sections A–E of original_notes.md (flash the SD card, first boot, connect over SSH, install python3 / git / apt packages).  
+1. SSH into the pi
+1. Clone the repo
+```
+cd ~
+git clone https://github.com/cobinrox/parrotpi.git
+cd parrotpi
+```
+
+2. Install system packages (if not already installed)
+```
+sudo apt update
+sudo apt install -y sox libsox-fmt-all ffmpeg python3-venv \
+                    libopenblas0 libopenblas-dev \
+                    libportaudio2 libportaudiocpp0 portaudio19-dev \
+                    avahi-daemon
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install -y caddy					
+```
+
+3. Create python venv and install python requirements
+```
+cd ~/parrotpi
+./1_venv_create.sh
+source 2_venv_activate_RUN_VIA_SOURCE.sh
+./3_venv_req_install.sh
+```
+
+4. Restore the config file or set up configs manually
+This will depend on the if you have access to the tgz back up file, if you do not have the backup file, then continue on to the next step.
+```
+cd ~/parrotpi/backups
+View the readme file and decrypt the backup file
+chmod +x sudo_restore_config_RUN_AS_SUDO.sh
+sudo ./sudo_restore_config_RUN_AS_SUDO.sh ~/parrotpi-config-backup-YYYY-MM-DD.tgz.gpg
+```
+
+5. (Only if you do not have the backup file) Set up Network + Caddy manually
+a. Create the two NetworkManager connection profiles:
+```
+# parrotpi-private (AP mode, 192.168.4.1, broadcasts SSID "parrotpi")
+sudo nmcli connection add type wifi ifname wlan0 con-name parrotpi-private \
+    autoconnect yes ssid parrotpi
+sudo nmcli connection modify parrotpi-private \
+    802-11-wireless.mode ap \
+    802-11-wireless.band bg \
+    ipv4.method shared \
+    ipv4.addresses 192.168.4.1/24 \
+    wifi-sec.key-mgmt wpa-psk \
+    wifi-sec.psk "<AP-PASSWORD-HERE>" \
+    connection.autoconnect-priority 100
+
+# parrotpi-dev (client on home wifi)
+sudo nmcli connection add type wifi ifname wlan0 con-name parrotpi-dev \
+    ssid "<HOME-SSID>"
+sudo nmcli connection modify parrotpi-dev \
+    wifi-sec.key-mgmt wpa-psk \
+    wifi-sec.psk "<HOME-WIFI-PASSWORD>" \
+    connection.autoconnect no
+```
+b. Add the dnsmasq drop-in so clients can resolve bare parrotpi:
+```
+sudo mkdir -p /etc/NetworkManager/dnsmasq-shared.d
+sudo tee /etc/NetworkManager/dnsmasq-shared.d/parrotpi.conf >/dev/null <<'EOF'
+address=/parrotpi/192.168.4.1
+address=/parrotpi.local/192.168.4.1
+EOF
+```
+c.  Disable the standalone dnsmasq service (NetworkManager's shared mode runs its own):
+```
+sudo systemctl disable --now dnsmasq 2>/dev/null || true
+```
+d. Write the Caddyfile:
+```
+sudo tee /etc/caddy/Caddyfile >/dev/null <<'EOF'
+{
+    default_sni 192.168.4.1
+}
+
+:80 {
+    redir https://{host}{uri}
+}
+
+parrotpi, parrotpi.local, 192.168.4.1 {
+    tls internal
+    reverse_proxy localhost:5000
+}
+EOF
+
+sudo systemctl restart caddy avahi-daemon
+sudo nmcli connection reload
+```
+
+6. Install as a systemd service (auto-start on boot)
+This creates the parrotpi.service unit, the logrotate config, and the sudoers rule for the web-UI shutdown button.
+```
+cd ~/parrotpi
+sudo ./scripts_sh/install_as_service_RUN_AS_SUDO.sh
+```
+
+7. Reboot
+sudo reboot now
+
+8. Connect via phone
+After ~60 seconds:  
+
+- On your phone/PC, you should see the parrotpi SSID broadcasting. Join it.
+- Browse to `https://192.168.4.1` — accept the self-signed cert warning. You should see the parrot UI.
+`https://parrotpi.local` and `https://parrotpi` may also work, depending on the browser and O/S of the phone.
+
+## Network Dev vs Private Mode Switching
+1. To switch to private network mode:
+```
+nohup sudo ./scripts_sh/nohup_sudo_go_private_ampersand.sh >/tmp/go-private.log 2>&1 &
+```
+
+2. To switch to join dev (e.g. home) network:
+```
+nohup sudo ./scripts_sh/nohup_sudo_go_dev_ampersand.sh >/tmp/go-dev.log 2>&1 &
+```
+
+## Notes on Backing Up Real-Time Cfg Files to a Backup Tar
+```
+cd ~/parrotpi
+chmod +x sudo_backup_config_RUN_AS_SUDO.sh
+sudo ./sudo_backup_config_RUN_AS_SUDO.sh
+# encrypt it (prompts for passphrase)
+gpg -c ~/parrotpi-config-backup-$(date +%F).tgz
+# copy to your PC and store safely
 ```
