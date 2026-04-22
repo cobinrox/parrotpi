@@ -20,8 +20,22 @@ up wav file that it plays upon start up to make sure that the sound card
 - There are also a few beak open/close buttons that tell the server to open/close the parrot's beak
 - There is also an Admin dialog that shows network information
 - Again, remember, though, that the buttons are enabled when the parrot server has returned a not-busy poll.
+- Boots automatically into a WiFi access point mode with SSID of ParrotPi (you can reconfigure the pi to just join a network as a DHCP client, too if you want)
+- At boot, the parrotpi python program starts up as a service automatically.
+- When the python program starts, it will automatically issue the SQUAWK!! parrot sound through the speaker to help you ensure that indeed the program has started and has access to the audio and servo.
+
 
 ![Main Page](./docs/ux_main_page.png)
+
+## Usage
+1. Turn on the Pi
+2. On your phone or client, join the `parrotpi` WiFi network
+3. Open a browser to `https:\\192.168.4.1`
+4. Click the "SAY" buttons to make the parrot speak pre-recorded phrases
+5. Click the "More..." buttons to make the parrot speak saved phrases that were saved off during the party
+6. Enable the Mic and then push and hold the "Hold to Talk" button to make the parrot speak ad-hoc phrases
+7. Use the "Save/Replay" button to save off the last ad-hoc phrase that you used or delete previous ad-hoc phrases
+8. Use the "Shutdown" button to shutdown the pi.
 
 ## Hardware
 - RaspberryPi B+
@@ -63,7 +77,7 @@ A custom script (`install_as_service.sh`) installs the project as a systemd serv
 Uses a local Python venv inside the project directory.
 The systemd service explicitly uses this interpreter.
 
-## 14. Dependencies
+## Dependencies
 - Flask, gpiozero, RPi.GPIO, plus standard Python libraries.
 - Core Python dependencies include:
 - Flask — web server
@@ -75,6 +89,9 @@ The systemd service explicitly uses this interpreter.
 
 ## Initial Set Up Notes
 See the originalnotes.md file for setting up raspberry pi
+
+## SSH Notes
+The system is set up to boot into WiFi private mode.  You'll need to connect your network to the parrotpi SSID and then ssh to 192.168.4.1, where the latter is the default IP of the Caddy service.
 
 ## Raspberry Pi GPIO Notes
 ```
