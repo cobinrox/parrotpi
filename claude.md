@@ -91,7 +91,7 @@ The systemd service explicitly uses this interpreter.
 See the originalnotes.md file for setting up raspberry pi
 
 ## SSH Notes
-The system is set up to boot into WiFi private mode.  You'll need to connect your network to the parrotpi SSID and then ssh to 192.168.4.1, where the latter is the default IP of the Caddy service.
+The system is set up to boot into WiFi private mode.  You'll need to connect your network to the parrotpi SSID and then ssh to 192.168.4.1, where the latter is the default IP of the Caddy service.  You can use the `scripts/scripts_sh/nohup_xxx` scripts to swap between private and dev network modes.
 
 ## Raspberry Pi GPIO Notes
 ```
