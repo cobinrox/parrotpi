@@ -4,7 +4,7 @@ This is a python3 flask web server for a raspberry pi-controlled anamatronic toy
 sends REST calls to the server such as move beak open/close, increase/
 decrease volume, playback a phrase (previously recorded wav file), and
 provide a push-to-talk socketio microphone near-realtime stream to
-playback through the parrot.  When the parrot noises are played,
+playback through the parrot.  It also has a few admin features that allow the user to save off his/her ad-hoc voice (when using push-to-talk capability) so that it can be replayed at a later tiome. When the parrot noises are played,
 the beak servo opens and closes while playing.  It also has a start
 up wav file that it plays upon start up to make sure that the sound card
 (MAX-98357A) was initialized properly and is working ok.
@@ -21,8 +21,15 @@ up wav file that it plays upon start up to make sure that the sound card
 - There is also an Admin dialog that shows network information
 - Again, remember, though, that the buttons are enabled when the parrot server has returned a not-busy poll.
 
+## Hardware
+- RaspberryPi B+
+- MAX-98357A Audio Card
+- External 4 Ohm Speaker
+- Micro 9g servo
+- PCA9685 GPIO buffer card (to protect GPIO/current spikes)
+  
 
-### 9. **Directory Structure** —
+## 9. **Directory Structure** —
 ```
 parrotpi/
   app/
@@ -40,21 +47,21 @@ parrotpi/
   install_as_service.sh
 ``` 
 
-### 11. **Logging** — 
+## 11. **Logging** — 
 When run as a service, writes to `/var/log/parrotpi/server.log` with logrotate support.
 
-### 12. **Systemd Integration** — 
+## 12. **Systemd Integration** — 
 A custom script (`install_as_service.sh`) installs the project as a systemd service so it:
 • 	starts automatically at boot
 • 	waits for Wi‑Fi/network
 • 	restarts on crash
 • 	logs to the correct directory
 
-### 13. **Virtual Environment** — 
+## 13. **Virtual Environment** — 
 Uses a local Python venv inside the project directory.
 The systemd service explicitly uses this interpreter.
 
-### 14. **Dependencies** — Flask, gpiozero, RPi.GPIO, plus standard Python libraries.
+## 14. **Dependencies** — Flask, gpiozero, RPi.GPIO, plus standard Python libraries.
 Core Python dependencies include:
 - Flask — web server
 - gpiozero — GPIO abstraction
@@ -63,7 +70,7 @@ Core Python dependencies include:
 - gunicorn (optional) — production WSGI server
 
 
-### 16. Initial Set Up Notes
+## 16. Initial Set Up Notes
 See the README.md file for setting up raspberry pi
 
 ## Raspberry Pi GPIO Notes
