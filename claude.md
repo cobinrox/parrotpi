@@ -21,7 +21,7 @@ up wav file that it plays upon start up to make sure that the sound card
 - There is also an Admin dialog that shows network information
 - Again, remember, though, that the buttons are enabled when the parrot server has returned a not-busy poll.
 
-![My image](./docs/myimage.png)
+![Main Page](./docs/ux_main_page.png)
 
 ## Hardware
 - RaspberryPi B+
