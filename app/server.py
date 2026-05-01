@@ -68,6 +68,7 @@ beak_moving = False
 
 mic_record_buffer = []
 mic_recording = False
+service_lock = threading.Lock()
 
 # Beak servo positions
 if BIRD == "big":
@@ -151,15 +152,25 @@ def set_parrot(percent):
 
 @app.route("/servo/beak/open", methods=["POST"])
 def beak_open():
-    logging.info("Beak open requested")
-    servo_set_position('open')
-    return jsonify({"status": "beak opened"})
+    if not service_acquire():
+        return jsonify({"error": "server busy"}), 423
+    try:
+        logging.info("Beak open requested")
+        servo_set_position('open')
+        return jsonify({"status": "beak opened"})
+    finally:
+        service_release()
 
 @app.route("/servo/beak/close", methods=["POST"])
 def beak_close():
-    logging.info("Beak close requested")
-    servo_set_position('closed')
-    return jsonify({"status": "beak closed"})
+    if not service_acquire():
+        return jsonify({"error": "server busy"}), 423
+    try:
+        logging.info("Beak close requested")
+        servo_set_position('closed')
+        return jsonify({"status": "beak closed"})
+    finally:
+        service_release()
 
 @app.route("/say", methods=["POST"])
 def say():
@@ -186,7 +197,10 @@ def say():
         }
         filename = phrase_map.get(phrase, "squawk3.wav")
 
-    play_wav(filename, subdir=subdir)
+    if not service_acquire():
+        return jsonify({"error": "server busy"}), 423
+
+    threading.Thread(target=_hold_play_service, args=(filename, subdir), daemon=True).start()
     return jsonify({"status": "played", "file": filename})
 
 @app.route("/list_saved")
@@ -227,7 +241,7 @@ def delete_phrase():
 
 @app.route("/hardware_status")
 def hardware_status():
-    busy = mic_active or beak_moving or not audio_queue.empty()
+    busy = service_lock.locked() or mic_active or beak_moving or not audio_queue.empty()
     logging.info(f"Hardware status requested: busy={busy}, mic={mic_active}, beak={beak_moving}, queue={audio_queue.qsize()}")
     return jsonify({
         "busy": busy,
@@ -269,6 +283,7 @@ def stop_all():
             audio_queue.get_nowait()
         except Exception:
             break
+    service_release()
     logging.info("STOP: mic killed, audio queue drained")
     return jsonify({"status": "stopped"})
 
@@ -598,6 +613,30 @@ def init_audio():
     logging.info("ALL AUDIO INIT FAILED")
     return False
 
+
+def service_acquire():
+    if service_lock.acquire(blocking=False):
+        logging.info("Service lock acquired")
+        return True
+    logging.info("Service lock busy")
+    return False
+
+
+def service_release():
+    if service_lock.locked():
+        service_lock.release()
+        logging.info("Service lock released")
+
+
+def _hold_play_service(filename, subdir=None):
+    try:
+        play_wav(filename, subdir=subdir)
+        while not audio_queue.empty() or beak_moving or mic_active:
+            time.sleep(0.1)
+    finally:
+        service_release()
+
+
 def play_wav(filename, subdir=None):
     global parrot_pct
     filepath = (AUDIO_DIR / subdir / filename) if subdir else (AUDIO_DIR / filename)
@@ -702,6 +741,11 @@ def save_mic_recording():
 @socketio.on('mic_start')
 def handle_mic_start(data):
     global mic_active, mic_recording, mic_record_buffer
+    if not service_acquire():
+        logging.info("Mic start rejected: server busy")
+        emit('mic_busy', {'error': 'server busy'})
+        return
+
     mic_active = True
     mic_recording = True
     mic_record_buffer = []  # Clear previous recording
@@ -717,6 +761,7 @@ def handle_mic_stop():
     print("🔇 Mic OFF")
     # Save recorded audio IMMEDIATELY
     save_mic_recording()
+    service_release()
 	
 @socketio.on('mic_chunk')
 def handle_mic_chunk(data):

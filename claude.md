@@ -149,6 +149,22 @@ Not 5V tolerant
 ~50mA total across GPIO
 
 ```
+
+### Pins for ParrotPi
+
+For the MAX98357A audio card:
+Vin  -> Pin 2  (5V)
+GND  -> Pin 6  (GND)
+BCLK -> Pin 12 (GPIO18, PCM_CLK)
+LRC  -> Pin 35 (GPIO19, PCM_FS / LRCLK)
+DIN  -> Pin 40 (GPIO21, PCM_DOUT)
+
+For the beak servo:
+Yellow (signal) -> 11 (signal/PWM/GPIO17)
+Orange (+5V)    -> 2  (+5v)
+Brown (GND)     -> 6  (or 39 or 34 or 20o or 14 or 6 or 25 or 9) (GND)
+
+
 ## Install on a Fresh pi
 Prerequisite: complete sections A–E of original_notes.md (flash the SD card, first boot, connect over SSH, install python3 / git / apt packages).  
 1. SSH into the pi
